@@ -1,0 +1,10 @@
+# Python dependencies for the pyboost PyPulseq port.
+# Install into a venv:  python3.11 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+numpy
+scipy
+matplotlib
+pytest
+pypulseq==1.4.2
+# Optional: cross-validation with the differentiable Bloch simulator.
+MRzeroCore>=1.0
+torch
