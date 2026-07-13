@@ -88,25 +88,40 @@ def t2_prep(system: pp.Opts, te: float = 50e-3, trf: float = 500e-6) -> Blocks:
     ]
 
 
-def adiabatic_ir(system: pp.Opts, post_delay: float,
-                 beta: float = 670.0, mu: float = 5.0,
-                 duration: float = 10.24e-3) -> Blocks:
-    """Adiabatic hyperbolic-secant inversion + spoiler + TI delay.
+def inversion(system: pp.Opts, post_delay: float, kind: str = "block",
+              block_duration: float = 1e-3, beta: float = 670.0, mu: float = 5.0,
+              duration: float = 10.24e-3) -> Blocks:
+    """Inversion pulse + spoiler + TI delay.
 
-    Mirrors ``RR_sim.jl:97-124`` (beta=6.7e2, mu=5, Trf=10.24 ms, BW = mu*beta/pi
-    ~ 1066 Hz). The B1-insensitive HS inversion is affordable at 0.55T where SAR
-    is far from limiting. ``post_delay`` is the time from the end of the inversion
-    spoiler to the next block (the remaining inversion-recovery delay, computed by
-    the caller so TI is measured to the centre of k-space acquisition).
+    ``kind``:
+
+    * ``"block"`` -- a hard 180 deg pulse. This is the default because it is what
+      the MRzero PDG simulator models correctly (it treats each RF as an
+      instantaneous rotation). At 0.55T B1 homogeneity is good and SAR is low, so
+      a hard inversion is perfectly usable.
+    * ``"adiabatic"`` -- a hyperbolic-secant pulse mirroring the Koma reference
+      (``RR_sim.jl:97-124``: beta=6.7e2, mu=5, Trf=10.24 ms). B1-insensitive and
+      preferable on the scanner, BUT the MRzero PDG does **not** reproduce
+      adiabatic inversion (the frequency sweep is lost in the rotation model, so
+      it saturates instead of inverts). Use it for the exported ``.seq`` /
+      KomaMRI (Bloch), not for MRzero validation.
+
+    ``post_delay`` is the time from the end of the inversion spoiler to the next
+    block (the remaining inversion-recovery delay; the caller computes it so TI
+    is measured to the start of k-space acquisition).
     """
     if post_delay < 0:
         raise ValueError(
-            f"IR post_delay is negative ({post_delay*1e3:.2f} ms): TI is shorter "
-            "than the inversion + spoiler + start-up train."
+            f"inversion post_delay is negative ({post_delay*1e3:.2f} ms): TI is "
+            "shorter than the inversion + spoiler + start-up train."
         )
-    rf = pp.make_adiabatic_pulse(
-        "hypsec", beta=beta, mu=mu, duration=duration,
-        system=system, use="inversion",
-    )
+    if kind == "block":
+        rf = pp.make_block_pulse(np.pi, duration=block_duration, system=system,
+                                 use="inversion")
+    elif kind == "adiabatic":
+        rf = pp.make_adiabatic_pulse("hypsec", beta=beta, mu=mu, duration=duration,
+                                     system=system, use="inversion")
+    else:
+        raise ValueError(f"unknown inversion kind {kind!r} (block|adiabatic)")
     sp = _spoiler(system, 8.0, flat_time=6000e-6, rise_time=600e-6)
     return [[rf], [sp], [pp.make_delay(post_delay)]]

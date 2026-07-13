@@ -22,7 +22,7 @@ from typing import List
 import pypulseq as pp
 
 from .params import BoostParams
-from .prep import fat_sat, t2_prep, adiabatic_ir
+from .prep import fat_sat, t2_prep, inversion
 from .readout import bssfp_readout
 
 Block = List
@@ -34,19 +34,28 @@ def _dur(blocks: Blocks) -> float:
 
 
 def _shot_lines(shot: int, p: BoostParams) -> List[int]:
-    """Interleaved phase-encode lines for one shot (covers 0..ny-1 across shots)."""
-    return list(range(shot, p.ny, p.n_shots))
+    """Phase-encode lines for one shot (interleaved shots cover 0..ny-1).
+
+    With ``centric`` ordering the lines within a shot are played nearest-to-DC
+    first, so the centre of k-space is sampled right after the preparation while
+    the black-blood contrast is still fresh (before the bSSFP transient washes it
+    out). Otherwise lines are played in ascending (linear) order.
+    """
+    lines = list(range(shot, p.ny, p.n_shots))
+    if p.centric:
+        lines.sort(key=lambda i: abs(i - p.ny / 2))
+    return lines
 
 
 def _contrast_blocks(system: pp.Opts, p: BoostParams, contrast: int,
                      lines: List[int], acquire: bool) -> Blocks:
     """Prep + readout for one contrast within a heartbeat."""
-    if contrast == 0:  # bright-blood: T2-prep + adiabatic inversion
+    if contrast == 0:  # bright-blood: T2-prep + inversion
         preps = t2_prep(system, te=p.t2prep_duration, trf=p.trf)
         # TI measured from the inversion to the start of imaging, mirroring
         # RR_sim.jl:170: IR_inversion_time - inav_lines*TR - Trf - TE.
         ti_delay = p.ir_inversion_time - p.inav_lines * p.tr - p.trf - p.te
-        preps += adiabatic_ir(system, post_delay=ti_delay)
+        preps += inversion(system, post_delay=ti_delay, kind=p.inversion_kind)
     else:              # reference: fat saturation only
         preps = fat_sat(system, flip_angle_deg=p.fatsat_flip_angle,
                         duration=p.fatsat_duration)
