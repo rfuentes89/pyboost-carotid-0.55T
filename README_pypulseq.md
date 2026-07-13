@@ -20,9 +20,11 @@ pyboost/
   prep.py       fat_sat, t2_prep, adiabatic_ir   (mirror RR_sim.jl:60-124)
   readout.py    bssfp_readout  (balanced bSSFP + iNAV ramp; the new encoding)
   boost.py      build_boost_sequence  (dual-contrast, gated assembly)
+  phantom.py    concentric 2D carotid phantom (lumen+wall+muscle+fat) -> MRzero
 scripts/
   write_boost_055T.py       build -> check_timing/test_report/SAR -> write .seq
   validate_with_mrzero.py   import .seq -> simulate 0.55T tissues -> compare contrast
+  image_carotid_phantom.py  simulate on the 2D phantom -> reconstruct contrasts + BB
 tests/          pytest unit + integration tests
 ```
 
@@ -42,6 +44,9 @@ python scripts/write_boost_055T.py --out boost_055T.seq
 
 # Cross-validate the .seq contrast against the Koma reference (needs MRzeroCore):
 python scripts/validate_with_mrzero.py
+
+# Image the 2D carotid phantom and reconstruct bright / reference / black-blood:
+python scripts/image_carotid_phantom.py --out carotid_boost.png
 
 # Run the test suite:
 python -m pytest tests/ -q
@@ -67,6 +72,28 @@ python -m pytest tests/ -q
 * **bSSFP** is favourable at low field: reduced off-resonance means fewer/wider
   banding artifacts for a given TR.
 
+## Carotid phantom & imaging (`pyboost.phantom`, `image_carotid_phantom.py`)
+
+A concentric 2D neck cross section — circular **lumen** (blood), a vessel-**wall**
+annulus, surrounding **muscle**, and a subcutaneous **fat** rind — on a pixel
+grid that matches the imaging FOV, with 0.55T PD/T1/T2 per tissue. Air is
+excluded to keep the voxel count down. `image_carotid_phantom.py` writes a
+single `.seq`, simulates it on this phantom in MRzero, reconstructs both BOOST
+contrasts (`reco_adjoint`, per-line bSSFP phase demodulated) and their
+subtraction, and saves a 4-panel figure. Two findings worth keeping in mind:
+
+* **Short acquisition window.** A single long readout (train ≫ fat T1 = 183 ms)
+  lets fat recover and defeats the FatSat. The multi-shot default (`im_segments`
+  lines/heartbeat, FatSat reapplied each heartbeat) keeps the window ~110 ms and
+  the fat suppression visible (fat ring goes bright→dark between the two
+  contrasts).
+* **Fat modelled on-resonance.** Placing fat at its true −80 Hz offset also drops
+  it onto the bSSFP frequency-response profile (80 Hz × 7 ms ≈ 200°/TR) and
+  corrupts its readout signal, masking the FatSat effect in this single-peak
+  model. The default keeps fat on-resonance (`apply_fat_offset=False`), which
+  reproduces the validated ~3–6× FatSat suppression. A chemical-shift-consistent
+  multi-peak fat model is a deferred refinement.
+
 ## Scope & caveats (this first iteration)
 
 * **No true blood flow.** Neither Koma nor MRzero models spin inflow/outflow, the
@@ -85,9 +112,11 @@ python -m pytest tests/ -q
 
 ## Roadmap
 
-1. 2D iNAV image navigator for motion correction.
-2. Differentiable optimization of `im_flip_angle`, `ir_inversion_time`,
+1. Differentiable optimization of `im_flip_angle`, `ir_inversion_time`,
    `fatsat_flip_angle` (marked "To be optimized" in `RR_sim.jl`) via
-   MRzero / Pulseq-zero.
-3. Geometric carotid phantom (lumen + wall) with GeometricMedicalPhantoms.jl.
+   MRzero / Pulseq-zero — including a true phase-sensitive black-blood
+   reconstruction that nulls the lumen (the current `|c0 - c1|` is a
+   placeholder subtraction).
+2. 2D iNAV image navigator for motion correction.
+3. Chemical-shift-consistent multi-peak fat model in the phantom.
 4. Quantitative Koma-vs-PyPulseq contrast comparison (run `RR_sim.jl` in Julia).
