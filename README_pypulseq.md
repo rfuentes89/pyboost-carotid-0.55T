@@ -69,6 +69,9 @@ python scripts/optimize_flip_coupled.py --out flip_coupled.png
 # CNR-efficiency optimization (penalizes long T2-prep, favours a shorter TE):
 python scripts/optimize_efficiency.py --out efficiency_opt.png
 
+# MRA phantom image at a sub-optimal vs the optimized flip (lumen conspicuity):
+python scripts/image_mra_optimized.py --out mra_optimized.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
