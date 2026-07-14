@@ -14,6 +14,7 @@ from .prep import fat_sat, t2_prep, inversion
 from .readout import bssfp_readout
 from .boost import build_boost_sequence
 from .mra import build_mra_sequence
+from .diffopt import import_mra_for_optimization, differentiable_flip_signal
 
 __all__ = [
     "scanner_055T",
@@ -26,4 +27,6 @@ __all__ = [
     "bssfp_readout",
     "build_boost_sequence",
     "build_mra_sequence",
+    "import_mra_for_optimization",
+    "differentiable_flip_signal",
 ]

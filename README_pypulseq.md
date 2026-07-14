@@ -57,6 +57,9 @@ python scripts/image_mra_phantom.py --out mra_carotid.png
 # Optimize the T2-prep echo time for blood-to-muscle contrast:
 python scripts/optimize_mra.py --out mra_t2prep_sweep.png
 
+# Differentiable optimization of the imaging flip angle (real MRzero gradient):
+python scripts/optimize_flip.py --out flip_opt.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -173,6 +176,27 @@ and the sweep/validation scripts import them.
 Note: `reco_adjoint` returns the image transposed w.r.t. the phantom (x,y) grid;
 the imaging scripts transpose it back so tissue statistics align with the label
 map.
+
+## Differentiable optimization through MRzero (`pyboost.diffopt`, `optimize_flip.py`)
+
+MRzero's simulation is differentiable, but our `.seq` round-trip freezes the pulse
+angles as constants on import. The trick in `pyboost.diffopt`: import the sequence
+(so gradients, timing and spoilers stay correct), then **replace the imaging
+pulses' `pulse.angle` with a torch tensor**. `mr0.util.simulate` is then
+differentiable w.r.t. the flip angle, so it can be optimized by gradient descent
+through the *real* simulator — no surrogate model.
+
+`optimize_flip.py` runs Adam on the bSSFP flip angle (T2-prep fixed at 60 ms) to
+maximize blood-to-muscle contrast. It converges into the contrast peak at
+**~100–120°**, matching a brute-force MRzero sweep. The blood/muscle *ratio* is
+nearly flat (~1.9) across flips, so the flip mainly trades absolute signal (SNR)
+against SAR/banding — ~90–110° is a sensible practical choice.
+
+Notes: the imaging flip is optimized with the iNAV catalyzation ramp held fixed
+(coupling the ramp to the flip flattens the optimum toward higher angles); a
+compact differentiable Bloch surrogate we first tried disagreed with the full
+simulation (predicting ~90°), which is exactly why the optimization differentiates
+through MRzero itself rather than a model.
 
 ## Scope & caveats (this first iteration)
 
