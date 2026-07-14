@@ -37,7 +37,7 @@ from pyboost import build_boost_sequence, BoostParams, scanner_055T
 TISSUES = {
     "blood":  dict(PD=0.70, T1=1.122, T2=0.263),
     "wall":   dict(PD=0.60, T1=0.750, T2=0.090),
-    "muscle": dict(PD=0.70, T1=0.600, T2=0.045),
+    "muscle": dict(PD=0.70, T1=0.450, T2=0.055),
     "fat":    dict(PD=1.00, T1=0.183, T2=0.093),
 }
 

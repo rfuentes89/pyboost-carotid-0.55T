@@ -34,7 +34,7 @@ def _spoiler(system: pp.Opts, amp_mT_m: float, flat_time: float,
     )
 
 
-def fat_sat(system: pp.Opts, flip_angle_deg: float = 180.0,
+def fat_sat(system: pp.Opts, flip_angle_deg: float = 130.0,
             duration: float = 26.624e-3, fat_ppm: float = -3.4e-6) -> Blocks:
     """Spectrally-selective gaussian fat saturation (``RR_sim.jl:60-81``).
 
