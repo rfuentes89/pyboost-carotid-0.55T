@@ -60,6 +60,9 @@ python scripts/optimize_mra.py --out mra_t2prep_sweep.png
 # Differentiable optimization of the imaging flip angle (real MRzero gradient):
 python scripts/optimize_flip.py --out flip_opt.png
 
+# Joint differentiable optimization of flip angle AND T2-prep TE:
+python scripts/optimize_joint.py --out joint_opt.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -191,6 +194,13 @@ maximize blood-to-muscle contrast. It converges into the contrast peak at
 **~100–120°**, matching a brute-force MRzero sweep. The blood/muscle *ratio* is
 nearly flat (~1.9) across flips, so the flip mainly trades absolute signal (SNR)
 against SAR/banding — ~90–110° is a sensible practical choice.
+
+`optimize_joint.py` extends this to a **2D** optimization of flip *and* T2-prep TE
+at once: the imaging pulses' angle is one torch tensor, and the T2-prep delay
+`event_time` is scaled by another (MRzero relaxes over `event_time`, so TE is
+differentiable too). Adam converges to **flip ≈ 110°, TE ≈ 95–110 ms** on the 2D
+contrast landscape (again, pure contrast pushes TE up; ~60 ms is the practical
+SNR/robustness choice).
 
 Notes: the imaging flip is optimized with the iNAV catalyzation ramp held fixed
 (coupling the ramp to the flip flattens the optimum toward higher angles); a

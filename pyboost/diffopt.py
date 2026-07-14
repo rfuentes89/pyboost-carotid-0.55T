@@ -52,16 +52,48 @@ def import_mra_for_optimization(p: BoostParams, system, base_flip_deg: float = 9
     return seq0, idx
 
 
-def differentiable_flip_signal(seq0, img_idx: List[int], flip_deg: torch.Tensor,
-                               obj, per: int) -> torch.Tensor:
-    """Central-k |signal| with the imaging flip set to ``flip_deg`` (torch tensor).
-
-    ``per`` is the number of samples in the first contrast block; the central
-    k-space sample within it is the echo peak. Differentiable w.r.t. ``flip_deg``.
-    """
+def set_imaging_flip(seq0, img_idx: List[int], flip_deg: torch.Tensor) -> None:
+    """Set every imaging pulse's angle to ``flip_deg`` (differentiable)."""
     for i in img_idx:
         seq0[i].pulse.angle = flip_deg * (np.pi / 180.0)
+
+
+def locate_t2prep_delays(seq0) -> Tuple[List[int], dict]:
+    """Reps carrying the T2-prep TE/2 delays: each 180 deg pulse and the 90 deg
+    before it. Returns their indices and a snapshot of their base ``event_time``
+    (which is scaled to change TE)."""
+    angles = np.array([float(r.pulse.angle) * 180 / np.pi for r in seq0])
+    te_idx: List[int] = []
+    for j in range(len(seq0)):
+        if abs(angles[j] - 180.0) < 1.0:
+            te_idx += [j - 1, j]
+    te_idx = sorted(set(i for i in te_idx if i >= 0))
+    base_et = {i: seq0[i].event_time.detach().clone() for i in te_idx}
+    return te_idx, base_et
+
+
+def set_t2prep_te(seq0, te_idx: List[int], base_et: dict, te: torch.Tensor,
+                  base_te: float = 0.06) -> None:
+    """Scale the T2-prep delay events so the echo time equals ``te`` (torch
+    tensor). MRzero relaxes over ``event_time``, so the signal is differentiable
+    w.r.t. ``te``."""
+    for i in te_idx:
+        seq0[i].event_time = base_et[i] * (te / base_te)
+
+
+def central_signal(seq0, obj, per: int) -> torch.Tensor:
+    """Central-k |signal| of the first contrast block (the echo peak)."""
     signal, kspace = mr0.util.simulate(seq0, obj)
     k = kspace.detach().cpu().numpy()[:per]
     c = int(np.argmin(np.abs(k[:, 0]) + np.abs(k[:, 1])))
     return signal.reshape(-1)[c].abs()
+
+
+def differentiable_flip_signal(seq0, img_idx: List[int], flip_deg: torch.Tensor,
+                               obj, per: int) -> torch.Tensor:
+    """Convenience: set the imaging flip and return the central |signal|.
+
+    Differentiable w.r.t. ``flip_deg`` (see :func:`set_imaging_flip`).
+    """
+    set_imaging_flip(seq0, img_idx, flip_deg)
+    return central_signal(seq0, obj, per)
