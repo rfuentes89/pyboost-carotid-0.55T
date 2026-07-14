@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from pyboost.system import scanner_055T, fat_frequency
-from pyboost.prep import fat_sat, t2_prep, adiabatic_ir
+from pyboost.prep import fat_sat, t2_prep, inversion
 
 
 def _flip_deg(rf):
@@ -52,17 +52,26 @@ def test_t2_prep_rejects_too_short_te(system):
         t2_prep(system, te=1e-3, trf=500e-6)
 
 
-def test_adiabatic_ir_structure(system):
-    blocks = adiabatic_ir(system, post_delay=40e-3)
+def test_inversion_block_default(system):
+    blocks = inversion(system, post_delay=40e-3)  # kind="block" by default
     assert len(blocks) == 3  # inversion, spoiler, delay
     assert blocks[2][0].delay == pytest.approx(40e-3)
+    assert _flip_deg(blocks[0][0]) == pytest.approx(180.0, abs=1.0)
+
+
+def test_inversion_adiabatic_is_frequency_swept(system):
+    blocks = inversion(system, post_delay=40e-3, kind="adiabatic")
     inv = blocks[0][0]
-    # Long, frequency-swept (adiabatic) pulse: ~10.24 ms with a sweeping RF
-    # phase (the tanh frequency modulation shows up as a varying signal phase).
+    # ~10.24 ms hyperbolic-secant with a sweeping RF phase (tanh FM).
     assert inv.shape_dur == pytest.approx(10.24e-3, rel=1e-3)
     assert np.ptp(np.angle(inv.signal)) > 1.0  # radians of phase sweep
 
 
-def test_adiabatic_ir_rejects_negative_delay(system):
+def test_inversion_rejects_negative_delay(system):
     with pytest.raises(ValueError):
-        adiabatic_ir(system, post_delay=-1e-3)
+        inversion(system, post_delay=-1e-3)
+
+
+def test_inversion_rejects_unknown_kind(system):
+    with pytest.raises(ValueError):
+        inversion(system, post_delay=40e-3, kind="spam")

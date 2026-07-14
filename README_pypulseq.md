@@ -48,6 +48,9 @@ python scripts/validate_with_mrzero.py
 # Image the 2D carotid phantom and reconstruct bright / reference / black-blood:
 python scripts/image_carotid_phantom.py --out carotid_boost.png
 
+# Sweep the inversion time to find the black-blood (blood-null) operating point:
+python scripts/optimize_ti.py --out ti_sweep.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -93,6 +96,36 @@ subtraction, and saves a 4-panel figure. Two findings worth keeping in mind:
   model. The default keeps fat on-resonance (`apply_fat_offset=False`), which
   reproduces the validated ~3–6× FatSat suppression. A chemical-shift-consistent
   multi-peak fat model is a deferred refinement.
+
+## Inversion pulse & TI optimization (`optimize_ti.py`)
+
+**Key cross-simulator finding.** MRzero's PDG models every RF pulse as an
+instantaneous rotation, so it does **not** reproduce adiabatic inversion — a
+hyperbolic-secant pulse *saturates* (Mz→0) instead of inverting (Mz→−1) in the
+simulation. The KomaMRI reference (full Bloch) does invert correctly. The
+inversion is therefore selectable (`BoostParams.inversion_kind`):
+
+* `"block"` (default) — a hard 180° pulse, which MRzero simulates correctly and
+  which is perfectly usable at 0.55T (good B1 homogeneity, low SAR);
+* `"adiabatic"` — the B1-robust HS pulse for the exported `.seq` / KomaMRI, but
+  **not** for MRzero validation.
+
+With the block inversion the pipeline reproduces textbook inversion recovery, and
+`optimize_ti.py` sweeps TI to find the **blood-null** operating point. Two more
+points that make the black-blood contrast actually appear:
+
+* **Phase-sensitive readout.** A magnitude `|c0 − c1|` cannot null blood (the
+  longest-T1 tissue); the script uses the signed projection
+  `Re(c0·c1*)/|c1|`, so blood goes dark exactly at its inversion null while
+  shorter-T1 wall/muscle (already past their nulls, opposite sign) stay bright.
+* **Centric ordering** (`BoostParams.centric`) samples ky=0 right after the prep,
+  before the bSSFP transient washes the prepared contrast out; with linear
+  ordering the black-blood contrast is lost by the time k-space centre is reached.
+
+At 0.55T this yields a blood-null TI of ~0.5 s for a single IR (T1_blood≈1.1 s).
+Note this is the classic IR/DIR black-blood mechanism; the full phase-sensitive
+BOOST scheme (short TI + dual-contrast subtraction) is more elaborate and a
+faithful port of it is future work.
 
 ## Scope & caveats (this first iteration)
 

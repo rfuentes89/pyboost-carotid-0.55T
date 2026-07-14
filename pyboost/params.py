@@ -18,6 +18,7 @@ class BoostParams:
     dummy_heart_beats: int = 3           # heartbeats to reach steady state
     inav_lines: int = 3                  # bSSFP start-up (iNAV) ramp pulses
     im_segments: int = 30                # imaging TRs (phase-encode lines) per shot
+    centric: bool = False                # centric k-space ordering (ky=0 acquired first)
 
     # --- Timing (RR_sim.jl:16-33) ---
     trf: float = 500e-6                  # imaging RF (block) duration [s]
@@ -33,7 +34,8 @@ class BoostParams:
     t2prep_duration: float = 50e-3       # T2-prep echo time [s]
     fatsat_flip_angle: float = 130.0     # FatSat flip angle [deg]
     fatsat_duration: float = 26.624e-3   # gaussian FatSat duration [s] (RR_sim.jl:21)
-    ir_inversion_time: float = 70e-3     # adiabatic IR inversion time TI [s]
+    ir_inversion_time: float = 90e-3     # IR inversion time TI [s]
+    inversion_kind: str = "block"        # "block" (MRzero-simulatable) | "adiabatic" (scanner)
 
     # --- Imaging geometry (new: required for real spatial encoding) ---
     fov: float = 200e-3                  # in-plane FOV [m]

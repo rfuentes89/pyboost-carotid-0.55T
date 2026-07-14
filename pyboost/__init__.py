@@ -10,7 +10,7 @@ readout adds real spatial encoding that the 1D contrast simulation never had.
 
 from .system import scanner_055T, FAT_PPM, fat_frequency
 from .params import BoostParams
-from .prep import fat_sat, t2_prep, adiabatic_ir
+from .prep import fat_sat, t2_prep, inversion
 from .readout import bssfp_readout
 from .boost import build_boost_sequence
 
@@ -21,7 +21,7 @@ __all__ = [
     "BoostParams",
     "fat_sat",
     "t2_prep",
-    "adiabatic_ir",
+    "inversion",
     "bssfp_readout",
     "build_boost_sequence",
 ]
