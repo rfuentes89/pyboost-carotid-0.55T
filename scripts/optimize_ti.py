@@ -35,13 +35,10 @@ import matplotlib.pyplot as plt
 
 import MRzeroCore as mr0
 from pyboost import build_boost_sequence, BoostParams, scanner_055T
+from pyboost.phantom import TISSUE_PROPERTIES
 
-# 0.55T tissues (RR_sim.jl:199-207 + muscle). Fat is not the target here.
-TISSUES = {
-    "blood":  dict(PD=0.70, T1=1.122, T2=0.263),
-    "wall":   dict(PD=0.60, T1=0.750, T2=0.090),
-    "muscle": dict(PD=0.70, T1=0.600, T2=0.045),
-}
+# Single source of truth for 0.55T relaxation values (pyboost/phantom.py).
+TISSUES = {k: TISSUE_PROPERTIES[k] for k in ("blood", "wall", "muscle")}
 COLORS = {"blood": "#c0392b", "wall": "#2980b9", "muscle": "#27ae60"}
 
 

@@ -31,15 +31,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import MRzeroCore as mr0
 from pyboost import build_boost_sequence, BoostParams, scanner_055T
+from pyboost.phantom import TISSUE_PROPERTIES as TISSUES
 
-# 0.55T tissue model. (PD, T1[s], T2[s]); T2dash is a small static-dephasing
-# term. Blood / wall / fat from RR_sim.jl:199-202; muscle typical at 0.55T.
-TISSUES = {
-    "blood":  dict(PD=0.70, T1=1.122, T2=0.263),
-    "wall":   dict(PD=0.60, T1=0.750, T2=0.090),
-    "muscle": dict(PD=0.70, T1=0.600, T2=0.045),
-    "fat":    dict(PD=1.00, T1=0.183, T2=0.093),
-}
+# 0.55T tissue model (PD, T1[s], T2[s]) -- single source of truth in
+# pyboost/phantom.py. Blood / wall from RR_sim.jl:199-202; muscle at 0.55T.
 
 
 def contrast_center_signal(signal, kspace, n_shots, im_segments, nx):

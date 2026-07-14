@@ -54,6 +54,9 @@ python scripts/optimize_ti.py --out ti_sweep.png
 # Bright-blood MRA of the carotid phantom (lumen bright, background suppressed):
 python scripts/image_mra_phantom.py --out mra_carotid.png
 
+# Optimize the T2-prep echo time for blood-to-muscle contrast:
+python scripts/optimize_mra.py --out mra_t2prep_sweep.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -154,10 +157,18 @@ assembles a single bright-blood contrast per heartbeat: `[inversion?] -> T2-prep
 | + T2-prep + FatSat| 0.19 | 0.08 | **2.55** |
 
 The **T2-prep** is the driver: blood's long T2 (~263 ms) is retained while muscle
-(~45 ms) decays, so blood becomes the brightest tissue. `image_mra_phantom.py`
+(T2 ~55 ms) decays, so blood becomes the brightest tissue. `image_mra_phantom.py`
 reconstructs a real image where the **lumen is bright** and muscle/fat are
-suppressed (lumen/muscle ≈ 2.6 in-image, matching the per-tissue prediction).
-This is the natural, simulatable counterpart to the black-blood ceiling above.
+suppressed. This is the natural, simulatable counterpart to the black-blood
+ceiling above.
+
+`optimize_mra.py` sweeps the T2-prep TE. The blood-to-muscle contrast rises with
+TE and plateaus around **TE ≈ 80–120 ms** (muscle fully suppressed) in this
+noiseless model. In practice a shorter TE (~40–60 ms) is used — blood signal at
+TE=120 ms is only ~60% of its TE=0 value, and long T2-preps are more sensitive to
+B1/B0, motion and diffusion (not modelled here). Relaxation values live in one
+place (`pyboost.phantom.TISSUE_PROPERTIES`; muscle at 0.55T = T1 450 / T2 55 ms)
+and the sweep/validation scripts import them.
 
 Note: `reco_adjoint` returns the image transposed w.r.t. the phantom (x,y) grid;
 the imaging scripts transpose it back so tissue statistics align with the label
