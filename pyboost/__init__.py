@@ -13,6 +13,7 @@ from .params import BoostParams
 from .prep import fat_sat, t2_prep, inversion
 from .readout import bssfp_readout
 from .boost import build_boost_sequence
+from .mra import build_mra_sequence
 
 __all__ = [
     "scanner_055T",
@@ -24,4 +25,5 @@ __all__ = [
     "inversion",
     "bssfp_readout",
     "build_boost_sequence",
+    "build_mra_sequence",
 ]

@@ -111,8 +111,8 @@ def main() -> int:
     signal, kspace = mr0.util.simulate(seq0, obj)
     bright, reference = grid_and_reconstruct(signal, kspace, p, fov,
                                              p.slice_thickness)
-    # Align the image y-axis with the phantom label display convention.
-    bright, reference = np.flipud(bright), np.flipud(reference)
+    # reco_adjoint returns the image transposed w.r.t. the phantom (x,y) grid.
+    bright, reference = bright.T, reference.T
     # Phase-sensitive black-blood: project the inverted bright-blood contrast onto
     # the phase of the reference. At the blood-null TI the lumen ~ 0 (dark) while
     # the shorter-T1 wall/muscle keep a large magnitude (bright). A plain

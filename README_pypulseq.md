@@ -51,6 +51,9 @@ python scripts/image_carotid_phantom.py --out carotid_boost.png
 # Sweep the inversion time to find the black-blood (blood-null) operating point:
 python scripts/optimize_ti.py --out ti_sweep.png
 
+# Bright-blood MRA of the carotid phantom (lumen bright, background suppressed):
+python scripts/image_mra_phantom.py --out mra_carotid.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -135,6 +138,30 @@ slice), which none of the available simulators model. **Bottom line: simulation
 here validates the prep-pulse and T1/relaxation physics; the flow-void lumen-vs-
 wall contrast that defines vessel-wall imaging can only be obtained on the
 scanner (or with a flowing-spin simulation).**
+
+## Bright-blood MRA (`pyboost.mra`, `image_mra_phantom.py`)
+
+Where black-blood needs flow (not simulatable), **bright-blood MRA rests on
+relaxation**, which the simulators reproduce faithfully. `build_mra_sequence`
+assembles a single bright-blood contrast per heartbeat: `[inversion?] -> T2-prep
+-> FatSat -> bSSFP readout`. The contrast mechanism, verified per tissue at
+0.55T:
+
+| stage | blood | muscle | blood/muscle |
+| :---- | :---- | :----- | :----------- |
+| bSSFP only        | 0.42 | 0.36 | 1.16 |
+| + T2-prep         | 0.34 | 0.14 | **2.46** |
+| + T2-prep + FatSat| 0.19 | 0.08 | **2.55** |
+
+The **T2-prep** is the driver: blood's long T2 (~263 ms) is retained while muscle
+(~45 ms) decays, so blood becomes the brightest tissue. `image_mra_phantom.py`
+reconstructs a real image where the **lumen is bright** and muscle/fat are
+suppressed (lumen/muscle ≈ 2.6 in-image, matching the per-tissue prediction).
+This is the natural, simulatable counterpart to the black-blood ceiling above.
+
+Note: `reco_adjoint` returns the image transposed w.r.t. the phantom (x,y) grid;
+the imaging scripts transpose it back so tissue statistics align with the label
+map.
 
 ## Scope & caveats (this first iteration)
 
