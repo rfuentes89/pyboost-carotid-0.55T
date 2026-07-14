@@ -1,15 +1,22 @@
-# pyboost — scanner-executable BOOST carotid sequence (PyPulseq, 0.55T)
+# pyboost — carotid MRI sequences & optimization at 0.55T (PyPulseq + MRzero)
 
-Python / [PyPulseq](https://github.com/imr-framework/pypulseq) port of the
-KomaMRI reference simulation (`RR_sim.jl`, `FA_sim.jl`) so the **BOOST**
-(bright-blood + black-blood *phase-sensitive*) carotid sequence can be exported
-as a real, scanner-executable `.seq` file at **0.55T**.
+Python package for **carotid pulse sequences at 0.55T**: a scanner-executable
+[PyPulseq](https://github.com/imr-framework/pypulseq) port of the KomaMRI
+reference (`RR_sim.jl`, `FA_sim.jl`), a 2D carotid phantom simulated in
+[MRzero](https://github.com/MRsources/MRzero-Core), and **differentiable
+sequence optimization**. It covers two contrasts:
+
+- **BOOST black-blood** (bright-blood + black-blood *phase-sensitive*) — the
+  original Koma target;
+- **bright-blood MRA** (T2-prep + bSSFP) — the relaxation-based, fully
+  simulatable angiography contrast.
 
 The Koma scripts are a *contrast* simulation on a 1D isochromat model (one ADC
 sample per TR, no spatial encoding). `pyboost` keeps the physics of every
-preparation block and adds the real spatial encoding a scanner needs: a fully
+preparation block and adds the real spatial encoding a scanner needs — a fully
 balanced segmented **bSSFP** readout with frequency + phase encoding, an iNAV
-start-up ramp, and the ECG-gated dual-contrast BOOST structure.
+start-up ramp, and ECG-gated assembly — plus phantom imaging and gradient-based
+optimization through the real simulator.
 
 ## Layout
 
@@ -17,15 +24,25 @@ start-up ramp, and the ECG-gated dual-contrast BOOST structure.
 pyboost/
   system.py     scanner_055T() -> pypulseq Opts (B0=0.55, Free.Max-like limits)
   params.py     BoostParams dataclass (mirrors seq_params + imaging geometry)
-  prep.py       fat_sat, t2_prep, adiabatic_ir   (mirror RR_sim.jl:60-124)
+  prep.py       fat_sat, t2_prep, inversion (block|adiabatic)  (mirror RR_sim.jl:60-124)
   readout.py    bssfp_readout  (balanced bSSFP + iNAV ramp; the new encoding)
-  boost.py      build_boost_sequence  (dual-contrast, gated assembly)
+  boost.py      build_boost_sequence  (black-blood dual-contrast, gated assembly)
+  mra.py        build_mra_sequence    (bright-blood single-contrast MRA)
   phantom.py    concentric 2D carotid phantom (lumen+wall+muscle+fat) -> MRzero
+  diffopt.py    differentiate through MRzero w.r.t. flip / T2-prep TE
 scripts/
   write_boost_055T.py       build -> check_timing/test_report/SAR -> write .seq
   validate_with_mrzero.py   import .seq -> simulate 0.55T tissues -> compare contrast
-  image_carotid_phantom.py  simulate on the 2D phantom -> reconstruct contrasts + BB
-tests/          pytest unit + integration tests
+  image_carotid_phantom.py  black-blood: simulate phantom -> reconstruct contrasts + BB
+  optimize_ti.py            black-blood: TI sweep for the blood-null operating point
+  image_mra_phantom.py      MRA: bright-blood phantom image
+  optimize_mra.py           MRA: T2-prep TE sweep
+  optimize_flip.py          MRA: differentiable flip optimization (MRzero gradient)
+  optimize_joint.py         MRA: joint flip + T2-prep TE optimization
+  optimize_flip_coupled.py  MRA: flip optimization, iNAV ramp fixed vs coupled
+  optimize_efficiency.py    MRA: CNR-efficiency objective (shorter TE)
+  image_mra_optimized.py    MRA: image at sub-optimal vs optimized flip
+tests/          pytest unit + integration tests (26)
 ```
 
 ## Setup
@@ -229,7 +246,7 @@ Note: a compact differentiable Bloch surrogate we first tried disagreed with the
 full simulation (predicting ~90°), which is exactly why the optimization
 differentiates through MRzero itself rather than a model.
 
-## Scope & caveats (this first iteration)
+## Scope & caveats
 
 * **No true blood flow.** Neither Koma nor MRzero models spin inflow/outflow, the
   physical basis of black-blood contrast. The prep pulses reproduce the
@@ -247,11 +264,17 @@ differentiates through MRzero itself rather than a model.
 
 ## Roadmap
 
-1. Differentiable optimization of `im_flip_angle`, `ir_inversion_time`,
-   `fatsat_flip_angle` (marked "To be optimized" in `RR_sim.jl`) via
-   MRzero / Pulseq-zero — including a true phase-sensitive black-blood
-   reconstruction that nulls the lumen (the current `|c0 - c1|` is a
-   placeholder subtraction).
-2. 2D iNAV image navigator for motion correction.
-3. Chemical-shift-consistent multi-peak fat model in the phantom.
-4. Quantitative Koma-vs-PyPulseq contrast comparison (run `RR_sim.jl` in Julia).
+Done: executable BOOST `.seq`; 2D carotid phantom; TI/T2-prep sweeps;
+bright-blood MRA; **differentiable optimization** of the imaging flip and T2-prep
+TE through MRzero (flip, joint, ramp-coupled, CNR-efficiency).
+
+Next:
+
+1. **Flowing-spin simulation** — the one thing that would break the black-blood
+   ceiling (and enable true TOF/PC MRA) by modelling blood inflow/outflow.
+2. **Robust / multi-tissue optimization** — fold B0/B1 dispersion or several
+   tissues into the loss, and export the optimized `.seq` for the scanner.
+3. Broaden the differentiable search to `inav_lines`, segment count, fat-sat flip.
+4. 2D iNAV image navigator for motion correction.
+5. Chemical-shift-consistent multi-peak fat model in the phantom.
+6. Quantitative Koma-vs-PyPulseq contrast comparison (run `RR_sim.jl` in Julia).
