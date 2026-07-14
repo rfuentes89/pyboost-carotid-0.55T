@@ -123,9 +123,18 @@ points that make the black-blood contrast actually appear:
   ordering the black-blood contrast is lost by the time k-space centre is reached.
 
 At 0.55T this yields a blood-null TI of ~0.5 s for a single IR (T1_blood≈1.1 s).
-Note this is the classic IR/DIR black-blood mechanism; the full phase-sensitive
-BOOST scheme (short TI + dual-contrast subtraction) is more elaborate and a
-faithful port of it is future work.
+
+**The fundamental ceiling (demonstrated by `image_carotid_phantom.py`).** Nulling
+blood by inversion darkens the *whole vessel*, not the lumen selectively, because
+blood (T1≈1122 ms) and vessel **wall** (T1≈750 ms) are too close in T1 — at the
+blood-null TI the wall is dark too (lumen ≈ wall in every simulated contrast). The
+spatial image is therefore a T1-weighted IR picture (long-T1 vessel dark vs
+short-T1 muscle bright), **not** true black-blood. Real carotid black-blood
+suppresses the lumen through **flow** (blood physically leaves the imaging
+slice), which none of the available simulators model. **Bottom line: simulation
+here validates the prep-pulse and T1/relaxation physics; the flow-void lumen-vs-
+wall contrast that defines vessel-wall imaging can only be obtained on the
+scanner (or with a flowing-spin simulation).**
 
 ## Scope & caveats (this first iteration)
 
