@@ -202,11 +202,17 @@ differentiable too). Adam converges to **flip ≈ 110°, TE ≈ 95–110 ms** on
 contrast landscape (again, pure contrast pushes TE up; ~60 ms is the practical
 SNR/robustness choice).
 
-Notes: the imaging flip is optimized with the iNAV catalyzation ramp held fixed
-(coupling the ramp to the flip flattens the optimum toward higher angles); a
-compact differentiable Bloch surrogate we first tried disagreed with the full
-simulation (predicting ~90°), which is exactly why the optimization differentiates
-through MRzero itself rather than a model.
+`optimize_flip_coupled.py` compares holding the iNAV catalyzation ramp fixed
+(it ramps to 90° regardless of the imaging flip) against coupling it (the ramp
+ends at the imaging flip, the physical choice). Coupling raises the contrast at
+low flip angles (no ramp/imaging mismatch) and shifts the optimum slightly
+**down** to ~90–100° (vs ~100–116° with the fixed ramp); the peak contrast is
+nearly identical. So the physically-correct coupling favours a lower, more
+typical flip.
+
+Note: a compact differentiable Bloch surrogate we first tried disagreed with the
+full simulation (predicting ~90°), which is exactly why the optimization
+differentiates through MRzero itself rather than a model.
 
 ## Scope & caveats (this first iteration)
 

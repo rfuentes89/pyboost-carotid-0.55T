@@ -16,7 +16,7 @@ from .boost import build_boost_sequence
 from .mra import build_mra_sequence
 from .diffopt import (import_mra_for_optimization, differentiable_flip_signal,
                       set_imaging_flip, locate_t2prep_delays, set_t2prep_te,
-                      central_signal)
+                      central_signal, locate_inav_ramp, set_imaging_flip_coupled)
 
 __all__ = [
     "scanner_055T",
@@ -35,4 +35,6 @@ __all__ = [
     "locate_t2prep_delays",
     "set_t2prep_te",
     "central_signal",
+    "locate_inav_ramp",
+    "set_imaging_flip_coupled",
 ]

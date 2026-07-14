@@ -58,6 +58,34 @@ def set_imaging_flip(seq0, img_idx: List[int], flip_deg: torch.Tensor) -> None:
         seq0[i].pulse.angle = flip_deg * (np.pi / 180.0)
 
 
+def locate_inav_ramp(seq0, inav_flip_deg: float = 3.2, base_flip_deg: float = 90.0
+                     ) -> Tuple[List[int], dict]:
+    """iNAV start-up ramp reps (angles strictly between the ramp start and the
+    imaging flip). Returns their indices and base angles [deg]."""
+    angles = np.array([float(r.pulse.angle) * 180 / np.pi for r in seq0])
+    idx = [i for i in range(len(seq0))
+           if inav_flip_deg - 0.5 <= angles[i] < base_flip_deg - 0.5]
+    return idx, {i: float(angles[i]) for i in idx}
+
+
+def set_imaging_flip_coupled(seq0, img_idx: List[int], ramp_idx: List[int],
+                             base_ramp: dict, flip_deg: torch.Tensor,
+                             inav_flip_deg: float = 3.2,
+                             base_flip_deg: float = 90.0) -> None:
+    """Set the imaging flip AND scale the iNAV ramp to end at that flip.
+
+    The ramp keeps its shape but its span tracks the flip:
+    ``angle_i = inav + (base_i - inav) * (flip - inav) / (base_flip - inav)``,
+    differentiable w.r.t. ``flip_deg``.
+    """
+    for i in img_idx:
+        seq0[i].pulse.angle = flip_deg * (np.pi / 180.0)
+    span = (flip_deg - inav_flip_deg) / (base_flip_deg - inav_flip_deg)
+    for i in ramp_idx:
+        angle = inav_flip_deg + (base_ramp[i] - inav_flip_deg) * span
+        seq0[i].pulse.angle = angle * (np.pi / 180.0)
+
+
 def locate_t2prep_delays(seq0) -> Tuple[List[int], dict]:
     """Reps carrying the T2-prep TE/2 delays: each 180 deg pulse and the 90 deg
     before it. Returns their indices and a snapshot of their base ``event_time``
