@@ -63,6 +63,12 @@ python scripts/optimize_flip.py --out flip_opt.png
 # Joint differentiable optimization of flip angle AND T2-prep TE:
 python scripts/optimize_joint.py --out joint_opt.png
 
+# Flip optimization with the iNAV ramp coupled to the flip (vs fixed):
+python scripts/optimize_flip_coupled.py --out flip_coupled.png
+
+# CNR-efficiency optimization (penalizes long T2-prep, favours a shorter TE):
+python scripts/optimize_efficiency.py --out efficiency_opt.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -199,8 +205,14 @@ against SAR/banding — ~90–110° is a sensible practical choice.
 at once: the imaging pulses' angle is one torch tensor, and the T2-prep delay
 `event_time` is scaled by another (MRzero relaxes over `event_time`, so TE is
 differentiable too). Adam converges to **flip ≈ 110°, TE ≈ 95–110 ms** on the 2D
-contrast landscape (again, pure contrast pushes TE up; ~60 ms is the practical
-SNR/robustness choice).
+contrast landscape.
+
+`optimize_efficiency.py` swaps the objective to **CNR efficiency**
+`(S_blood − S_muscle) / sqrt(TE + T_readout)`. In a gated scan the total time is
+fixed, so plain `CNR/sqrt(total_time)` reduces to contrast; the meaningful cost of
+a long T2-prep is that it is *overhead* stealing readout time. This penalty pulls
+the optimal TE down to **~79 ms** (vs ~95 ms for pure contrast) — toward the
+practical range.
 
 `optimize_flip_coupled.py` compares holding the iNAV catalyzation ramp fixed
 (it ramps to 90° regardless of the imaging flip) against coupling it (the ramp
