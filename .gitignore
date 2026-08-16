@@ -8,3 +8,6 @@ __pycache__/
 # Generated sequences / outputs
 *.seq
 pyboost_out/
+# ...but keep the committed, ready-to-run executable sequences:
+!seq/
+!seq/*.seq

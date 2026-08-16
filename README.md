@@ -66,6 +66,7 @@ RR_sim.jl, FA_sim.jl        KomaMRI reference (Julia)
 pyboost/                    PyPulseq package: system, params, prep, readout,
                             boost, mra, phantom, diffopt
 scripts/                    build/validate/image/optimize entry points
+seq/                        ready-to-run executable .seq files (BOOST + MRA)
 tests/                      pytest suite
 README_pypulseq.md          full Python documentation
 ```
