@@ -11,7 +11,7 @@ torch = pytest.importorskip("torch")
 mr0 = pytest.importorskip("MRzeroCore")
 
 from pyboost import (BoostParams, scanner_055T, import_mra_for_optimization,
-                     differentiable_flip_signal)
+                     differentiable_flip_signal, build_mra_sequence, locate_fatsat)
 from pyboost.phantom import TISSUE_PROPERTIES
 
 
@@ -31,6 +31,22 @@ def test_imaging_pulses_identified(imported):
     # The isolated T2-prep 90 deg pulses must NOT be selected.
     angles = np.array([float(seq0[i].pulse.angle) * 180 / np.pi for i in img_idx])
     assert np.all(np.abs(angles - 90.0) < 1.0)
+
+
+def test_locate_fatsat_finds_offset_pulse():
+    p = BoostParams(nx=8, ny=8, im_segments=8, dummy_heart_beats=0, centric=True,
+                    t2prep_duration=0.06)
+    seq = build_mra_sequence(p, scanner_055T(), use_t2prep=True, use_fatsat=True,
+                             add_trigger=False)
+    seq.write("/tmp/test_fs.seq")
+    seq0 = mr0.Sequence.import_file("/tmp/test_fs.seq")
+    fs = locate_fatsat(seq0)
+    assert len(fs) == 1                                  # one FatSat per heartbeat
+    # It is the spectrally-selective pulse: nonzero RF frequency offset.
+    assert abs(float(seq0[fs[0]].pulse.freq_offset)) > 1.0
+    # ...and the T2-prep / imaging pulses are on-resonance (not selected).
+    others = [i for i in range(len(seq0)) if i not in fs]
+    assert all(abs(float(seq0[i].pulse.freq_offset)) < 1.0 for i in others)
 
 
 def test_signal_is_differentiable(imported):

@@ -89,6 +89,12 @@ python scripts/optimize_efficiency.py --out efficiency_opt.png
 # MRA phantom image at a sub-optimal vs the optimized flip (lumen conspicuity):
 python scripts/image_mra_optimized.py --out mra_optimized.png
 
+# Differentiable FatSat-flip optimization (poorly selective at 0.55T):
+python scripts/optimize_fatsat.py --out fatsat_opt.png
+
+# Discrete sweeps of the integer parameters iNAV_lines and im_segments:
+python scripts/sweep_structure.py --out structure_sweep.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -245,6 +251,28 @@ typical flip.
 Note: a compact differentiable Bloch surrogate we first tried disagreed with the
 full simulation (predicting ~90°), which is exactly why the optimization
 differentiates through MRzero itself rather than a model.
+
+### FatSat flip (`optimize_fatsat.py`) and structural sweeps (`sweep_structure.py`)
+
+The **FatSat flip** is also continuous, so it is optimized differentiably
+(`locate_fatsat` finds it as the only pulse with a nonzero RF frequency offset).
+Two findings, both physically meaningful at 0.55T:
+
+* **The FatSat is poorly selective here.** With the pulse bandwidth (~80 Hz)
+  comparable to the fat–water gap (~80 Hz), the FatSat perturbs on-resonance
+  blood almost as much as fat — their signal-vs-flip curves track together. By a
+  single-voxel blood-to-fat *contrast* metric FatSat gives no net gain (its real
+  value is removing fat's *spatial* artifacts, which a point metric can't see).
+* **The landscape is non-convex** (humps near ~20° and ~180°), so a single
+  gradient descent lands in a local optimum depending on initialization; a
+  multi-start (or the brute sweep) is needed — a concrete reminder that
+  differentiable ≠ convex.
+
+**Structural (integer) parameters have no gradient** and are swept discretely:
+`iNAV_lines` (contrast improves with a longer catalyzation ramp, at the cost of
+dead time) and `im_segments` (nearly flat central-line contrast — centric
+ordering preserves it — so the choice is really the scan-time vs readout-window
+tradeoff: fewer segments = more heartbeats but a shorter window).
 
 ## Scope & caveats
 

@@ -68,6 +68,14 @@ def locate_inav_ramp(seq0, inav_flip_deg: float = 3.2, base_flip_deg: float = 90
     return idx, {i: float(angles[i]) for i in idx}
 
 
+def locate_fatsat(seq0) -> List[int]:
+    """FatSat pulse reps -- the only ones with a nonzero RF frequency offset
+    (the spectrally-selective pulse sits on the fat resonance). Their angle is
+    made differentiable to optimize fat suppression."""
+    return [i for i in range(len(seq0))
+            if abs(float(seq0[i].pulse.freq_offset)) > 1.0]
+
+
 def set_imaging_flip_coupled(seq0, img_idx: List[int], ramp_idx: List[int],
                              base_ramp: dict, flip_deg: torch.Tensor,
                              inav_flip_deg: float = 3.2,
