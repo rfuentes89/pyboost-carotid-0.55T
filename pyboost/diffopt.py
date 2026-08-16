@@ -117,6 +117,86 @@ def set_t2prep_te(seq0, te_idx: List[int], base_et: dict, te: torch.Tensor,
         seq0[i].event_time = base_et[i] * (te / base_te)
 
 
+def locate_react_inversion(seq0, imaging_flip_deg: float = 15.0
+                           ) -> Tuple[List[int], dict]:
+    """REACT's inversion repetitions -- the ones carrying the TI delay.
+
+    A REACT shot contains *two* 180 deg pulses: the T2-prep refocusing pulse and
+    the non-selective inversion. They are told apart by what follows them -- the
+    inversion is the one immediately preceding the imaging train, whereas the
+    T2-prep's 180 is followed by the tip-up 90.
+
+    Returns the indices and, per index, ``(base_event_time, delay_position)``
+    where ``delay_position`` is the entry holding the TI delay (the longest one).
+    """
+    angles = np.array([float(r.pulse.angle) * 180 / np.pi for r in seq0])
+    idx = [i for i in range(len(seq0) - 1)
+           if abs(angles[i] - 180.0) < 1.0
+           and abs(angles[i + 1] - imaging_flip_deg) < 0.5]
+    info = {}
+    for i in idx:
+        et = seq0[i].event_time.detach().clone()
+        info[i] = (et, int(torch.argmax(et)))
+    return idx, info
+
+
+def set_react_ti(seq0, inv_idx: List[int], info: dict, ti: torch.Tensor) -> None:
+    """Set REACT's inversion time to ``ti`` (a torch tensor), differentiably.
+
+    Only the TI delay event is rescaled, not the whole repetition: the inversion
+    pulse and its spoiler have fixed durations, so scaling them too would make
+    the achieved TI drift from the requested one. The delay absorbs the whole
+    difference, which keeps ``ti`` exact and the gradient clean.
+    """
+    for i in inv_idx:
+        base_et, pos = info[i]
+        others = base_et.sum() - base_et[pos]
+        # Rebuild by concatenation rather than in-place assignment so autograd
+        # keeps a clean path from `ti` to the delay event.
+        et = torch.cat([base_et[:pos], (ti - others).reshape(1),
+                        base_et[pos + 1:]])
+        seq0[i].event_time = et
+
+
+def import_react_for_optimization(p, system, path: str = "/tmp/react_opt_diff.seq"
+                                  ) -> Tuple[object, List[int], dict]:
+    """Build + import a REACT sequence and locate its inversion repetitions.
+
+    The inversion is forced to ``block``: MRzero's PDG model cannot reproduce an
+    adiabatic frequency sweep (it would saturate rather than invert), so TI
+    optimization has to run on the hard-pulse variant. The optimum transfers --
+    an adiabatic inversion inverts more robustly, not differently.
+    """
+    from .react import build_react_sequence
+    from dataclasses import replace
+    p = replace(p, inversion_kind="block")
+    seq = build_react_sequence(p, system)
+    seq.write(path)
+    seq0 = mr0.Sequence.import_file(path)
+    inv_idx, info = locate_react_inversion(seq0, p.flip_angle)
+    if not inv_idx:
+        raise RuntimeError("no REACT inversion repetition found; check the "
+                           "sequence structure or the imaging flip angle")
+    return seq0, inv_idx, info
+
+
+def react_dc_signal(seq0, obj, nx: int) -> torch.Tensor:
+    """Complex signal at the true k-space centre of echo 1, differentiable.
+
+    Echo 1 is what carries the REACT contrast; echo 2 exists to encode fat. The
+    DC point is taken globally rather than per-TR because with centric ordering
+    it is acquired first, while the prepared magnetization is still fresh.
+    """
+    signal, kspace = mr0.util.simulate(seq0, obj)
+    sig = signal.reshape(-1)
+    k = kspace.detach().cpu().numpy()
+    n_tr = len(sig) // (2 * nx)
+    idx = np.concatenate([np.arange(2 * i * nx, 2 * i * nx + nx)
+                          for i in range(n_tr)])
+    c = int(idx[np.argmin(np.linalg.norm(k[idx][:, :3], axis=1))])
+    return sig[c]
+
+
 def central_signal(seq0, obj, per: int) -> torch.Tensor:
     """Central-k |signal| of the first contrast block (the echo peak)."""
     signal, kspace = mr0.util.simulate(seq0, obj)

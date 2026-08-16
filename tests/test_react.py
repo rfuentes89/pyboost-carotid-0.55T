@@ -226,3 +226,74 @@ def test_adiabatic_inversion_builds(system, small):
 def test_fatsat_fallback_builds(system, small):
     seq = build_react_sequence(small, system, use_fatsat=True)
     assert seq.check_timing()[0]
+
+
+# --- Differentiable TI (pyboost.diffopt) -----------------------------------
+
+@pytest.fixture
+def tiny():
+    """Smallest sequence that still has a full prep + shot, for MRzero."""
+    return ReactParams(nx=16, ny=8, tfe_factor=8, dummy_shots=0)
+
+
+def _voxel(name):
+    import MRzeroCore as mr0
+    t = TISSUE_PROPERTIES[name]
+    return mr0.CustomVoxelPhantom(
+        pos=[[0.0, 0.0, 0.0]], PD=t["PD"], T1=t["T1"], T2=t["T2"],
+        T2dash=0.03, D=0.0, voxel_size=0.005,
+    )
+
+
+def test_inversion_rep_is_found_and_is_not_the_t2prep_refocus(system, tiny):
+    """A REACT shot has two 180 deg pulses; only one carries the TI."""
+    from pyboost.diffopt import import_react_for_optimization
+    seq0, inv_idx, info = import_react_for_optimization(tiny, system)
+    assert len(inv_idx) == 1, "expected exactly one inversion per shot"
+    # The one that carries TI is the long repetition, not the T2-prep refocus.
+    durations = [float(rep.event_time.sum()) for rep in seq0]
+    assert durations[inv_idx[0]] == pytest.approx(tiny.resolved_ti(), abs=5e-3)
+
+
+def test_set_react_ti_is_exact(system, tiny):
+    """The delay absorbs the whole change, so the requested TI is what plays."""
+    import torch
+    from pyboost.diffopt import import_react_for_optimization, set_react_ti
+    seq0, inv_idx, info = import_react_for_optimization(tiny, system)
+    for target in (0.06, 0.12):
+        set_react_ti(seq0, inv_idx, info, torch.tensor(target))
+        assert float(seq0[inv_idx[0]].event_time.sum()) == \
+            pytest.approx(target, abs=1e-6)
+
+
+def test_ti_is_differentiable(system, tiny):
+    """Gradient must flow from the signal back to TI, or optimization is fake."""
+    import torch
+    from pyboost.diffopt import (import_react_for_optimization, set_react_ti,
+                                 react_dc_signal)
+    seq0, inv_idx, info = import_react_for_optimization(tiny, system)
+    ti = torch.tensor(float(tiny.resolved_ti()), requires_grad=True)
+    set_react_ti(seq0, inv_idx, info, ti)
+    react_dc_signal(seq0, _voxel("blood"), tiny.nx).abs().backward()
+    assert ti.grad is not None
+    assert math.isfinite(float(ti.grad)) and abs(float(ti.grad)) > 0
+
+
+def test_derived_ti_suppresses_fat_better_than_a_far_off_ti(system, tiny):
+    """Sanity on the derivation: 84 ms must beat 180 ms at nulling fat.
+
+    At TI ~180 ms fat has recovered past its null and outshines blood, which the
+    TI sweep shows flipping the contrast negative. If the derived TI did not
+    clearly win here, the null-time formula would be wrong.
+    """
+    import torch
+    from pyboost.diffopt import (import_react_for_optimization, set_react_ti,
+                                 react_dc_signal)
+    seq0, inv_idx, info = import_react_for_optimization(tiny, system)
+    fat = _voxel("fat")
+
+    def fat_signal(ti_s):
+        set_react_ti(seq0, inv_idx, info, torch.tensor(ti_s))
+        return float(react_dc_signal(seq0, fat, tiny.nx).abs())
+
+    assert fat_signal(tiny.resolved_ti()) < fat_signal(0.180)
