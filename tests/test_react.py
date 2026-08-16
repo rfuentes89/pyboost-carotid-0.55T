@@ -279,6 +279,67 @@ def test_ti_is_differentiable(system, tiny):
     assert math.isfinite(float(ti.grad)) and abs(float(ti.grad)) > 0
 
 
+def test_recovery_reps_found_once_per_shot_except_the_last(system):
+    """The trailing delay lands on the last imaging TR of every shot but the last."""
+    from pyboost.diffopt import (import_react_for_optimization,
+                                 locate_react_recovery)
+    p = ReactParams(nx=16, ny=8, tfe_factor=4, dummy_shots=1)
+    seq0, _, _ = import_react_for_optimization(p, system)
+    rec_idx, _, overhead = locate_react_recovery(seq0, p.flip_angle)
+    n_shots_total = p.dummy_shots + p.n_shots
+    assert len(rec_idx) == n_shots_total - 1
+    assert 0 < overhead < p.shot_interval
+
+
+def test_set_shot_interval_is_exact(system):
+    """The recovery delay absorbs the change, so the requested interval plays."""
+    import torch
+    from pyboost.diffopt import (import_react_for_optimization,
+                                 locate_react_recovery,
+                                 set_react_shot_interval)
+    p = ReactParams(nx=16, ny=8, tfe_factor=4, dummy_shots=1)
+    seq0, _, _ = import_react_for_optimization(p, system)
+    rec_idx, rec_info, overhead = locate_react_recovery(seq0, p.flip_angle)
+    for target in (0.8, 2.5):
+        set_react_shot_interval(seq0, rec_idx, rec_info, overhead,
+                                torch.tensor(target))
+        base_et, pos = rec_info[rec_idx[0]]
+        fill = float(seq0[rec_idx[0]].event_time[pos])
+        assert overhead + fill == pytest.approx(target, abs=1e-6)
+
+
+def test_shot_interval_below_overhead_is_rejected(system):
+    import torch
+    from pyboost.diffopt import (import_react_for_optimization,
+                                 locate_react_recovery,
+                                 set_react_shot_interval)
+    p = ReactParams(nx=16, ny=8, tfe_factor=4, dummy_shots=1)
+    seq0, _, _ = import_react_for_optimization(p, system)
+    rec_idx, rec_info, overhead = locate_react_recovery(seq0, p.flip_angle)
+    with pytest.raises(ValueError, match="shorter than the shot"):
+        set_react_shot_interval(seq0, rec_idx, rec_info, overhead,
+                                torch.tensor(overhead / 2))
+
+
+def test_longer_shot_interval_recovers_more_blood(system):
+    """The physical premise of the default: blood is the tissue that under-recovers."""
+    import torch
+    from pyboost.diffopt import (import_react_for_optimization,
+                                 locate_react_recovery,
+                                 set_react_shot_interval, react_dc_signal)
+    p = ReactParams(nx=16, ny=8, tfe_factor=8, dummy_shots=1)
+    seq0, _, _ = import_react_for_optimization(p, system)
+    rec_idx, rec_info, overhead = locate_react_recovery(seq0, p.flip_angle)
+    blood = _voxel("blood")
+
+    def sig(interval):
+        set_react_shot_interval(seq0, rec_idx, rec_info, overhead,
+                                torch.tensor(interval))
+        return float(react_dc_signal(seq0, blood, p.nx).abs())
+
+    assert sig(3.0) > sig(1.0)
+
+
 def test_derived_ti_suppresses_fat_better_than_a_far_off_ti(system, tiny):
     """Sanity on the derivation: 84 ms must beat 180 ms at nulling fat.
 

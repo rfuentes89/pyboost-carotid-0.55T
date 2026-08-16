@@ -20,7 +20,8 @@ from .diffopt import (import_mra_for_optimization, differentiable_flip_signal,
                       set_imaging_flip, locate_t2prep_delays, set_t2prep_te,
                       central_signal, locate_inav_ramp, set_imaging_flip_coupled,
                       locate_fatsat, locate_react_inversion, set_react_ti,
-                      import_react_for_optimization, react_dc_signal)
+                      import_react_for_optimization, react_dc_signal,
+                      locate_react_recovery, set_react_shot_interval)
 
 __all__ = [
     "scanner_055T",
@@ -54,4 +55,6 @@ __all__ = [
     "set_react_ti",
     "import_react_for_optimization",
     "react_dc_signal",
+    "locate_react_recovery",
+    "set_react_shot_interval",
 ]

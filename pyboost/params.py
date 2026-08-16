@@ -145,7 +145,22 @@ class ReactParams:
     # At 0.55T the Dixon spacing forces TR ~15.8 ms, so matching that shot window
     # (which is what sets how far the prepared contrast decays) allows ~22.
     tfe_factor: int = 22
-    shot_interval: float = 1.0           # time from one preparation to the next [s]
+    # Shot interval. DERIVED by simulation, not from literature: REACT is
+    # untriggered, so this is a free parameter rather than an RR interval, and it
+    # decides how much of blood's magnetization has returned before the next
+    # T2-prep. Blood has the longest T1 in the neck (1122 ms at 0.55T), so it is
+    # both the tissue that suffers most from a short interval and the one REACT
+    # wants brightest. scripts/optimize_react_shot_interval.py maximizes contrast
+    # per sqrt(scan time) and lands at ~3.0 s (2.7 x blood T1): against the 1.0 s
+    # that seemed natural, that is +144% contrast and +105% blood signal for a
+    # 6 s -> 18 s scan on the 2D protocol.
+    #
+    # Two warnings. (1) The efficiency landscape is NOT unimodal -- there is a
+    # decoy local maximum near 800 ms, 25% worse, which plain gradient descent
+    # from 1 s converges to. (2) In 3D the shot count multiplies by nz, so this
+    # default can make the scan impractically long; re-run the optimizer with
+    # --max-scan to maximize contrast under a scan-time ceiling instead.
+    shot_interval: float = 3.0           # time from one preparation to the next [s]
     dummy_shots: int = 2                 # shots run without ADC to reach steady state
     centric: bool = True                 # centre of k-space right after the TI
 

@@ -180,6 +180,59 @@ def import_react_for_optimization(p, system, path: str = "/tmp/react_opt_diff.se
     return seq0, inv_idx, info
 
 
+def locate_react_recovery(seq0, imaging_flip_deg: float = 15.0
+                          ) -> Tuple[List[int], dict, float]:
+    """REACT's inter-shot recovery repetitions, and the shot's fixed overhead.
+
+    REACT is untriggered, so the time between preparations is a free parameter
+    rather than an RR interval. Pypulseq emits that recovery as a trailing delay
+    block, which MRzero folds into the *last imaging repetition of each shot* --
+    identified here as an imaging pulse whose successor is the next shot's
+    T2-prep 90 deg. The final shot has no trailing delay and is skipped.
+
+    Returns ``(indices, info, shot_overhead)`` where ``info[i]`` is
+    ``(base_event_time, delay_position)`` and ``shot_overhead`` is everything in
+    one shot except that delay (prep modules plus the imaging train), in
+    seconds. ``shot_interval = shot_overhead + recovery_delay``.
+    """
+    angles = np.array([float(r.pulse.angle) * 180 / np.pi for r in seq0])
+    idx = [i for i in range(len(seq0) - 1)
+           if abs(angles[i] - imaging_flip_deg) < 0.5
+           and abs(angles[i + 1] - 90.0) < 1.0]
+    info = {}
+    for i in idx:
+        et = seq0[i].event_time.detach().clone()
+        info[i] = (et, int(torch.argmax(et)))
+    if not idx:
+        return idx, info, 0.0
+    first = idx[0]
+    base_et, pos = info[first]
+    overhead = sum(float(seq0[j].event_time.sum()) for j in range(first + 1))
+    overhead -= float(base_et[pos])
+    return idx, info, overhead
+
+
+def set_react_shot_interval(seq0, rec_idx: List[int], info: dict,
+                            shot_overhead: float,
+                            shot_interval: torch.Tensor) -> None:
+    """Set the preparation-to-preparation interval, differentiably.
+
+    The recovery delay absorbs the difference, so ``shot_interval`` is exactly
+    what plays. Raises if the requested interval is shorter than the shot's own
+    fixed overhead, which would otherwise silently produce a negative delay.
+    """
+    slack = shot_interval - shot_overhead
+    if float(slack) < 0:
+        raise ValueError(
+            f"shot_interval={float(shot_interval)*1e3:.0f} ms is shorter than the "
+            f"shot itself ({shot_overhead*1e3:.0f} ms of prep + readout)."
+        )
+    for i in rec_idx:
+        base_et, pos = info[i]
+        et = torch.cat([base_et[:pos], slack.reshape(1), base_et[pos + 1:]])
+        seq0[i].event_time = et
+
+
 def react_dc_signal(seq0, obj, nx: int) -> torch.Tensor:
     """Complex signal at the true k-space centre of echo 1, differentiable.
 
