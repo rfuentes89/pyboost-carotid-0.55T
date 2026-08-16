@@ -57,13 +57,20 @@ class CarotidGeometry:
     apply_fat_offset: bool = False    # see note below
 
     # NOTE on fat off-resonance. Physically fat sits ~-80 Hz from water, and the
-    # FatSat pulse is spectrally selective there. In this simplified model,
-    # however, placing fat at that B0 offset also throws it onto the bSSFP
-    # frequency-response profile (80 Hz x TR=7 ms ~ 200 deg/TR), which corrupts
-    # its readout signal and masks the FatSat effect. Keeping fat on-resonance
-    # (apply_fat_offset=False) reproduces the validated FatSat suppression
-    # (~6x). Chemical-shift displacement / fat bSSFP banding is a deferred
-    # refinement (would need a multi-peak fat model consistent with the readout).
+    # FatSat pulse is spectrally selective there. Whether to model that offset
+    # depends on the readout:
+    #
+    # * **bSSFP (BOOST, MRA)** -- keep it OFF. Placing fat at that B0 offset
+    #   throws it onto the bSSFP frequency-response profile (80 Hz x TR=7 ms ~
+    #   200 deg/TR), which corrupts its readout signal and masks the FatSat
+    #   effect. apply_fat_offset=False reproduces the validated ~6x suppression.
+    # * **REACT** -- turn it ON. The dual-echo Dixon readout is *spoiled* and
+    #   non-balanced, so there is no bSSFP passband to fall foul of, and the
+    #   whole point of the readout is that fat accrues phase between the echoes.
+    #   With the offset at zero the two echoes are identical and water/fat
+    #   separation is untestable, so simulating REACT without it proves nothing.
+    #
+    # Multi-peak fat remains a deferred refinement in both cases.
 
     def fat_offset_hz(self) -> float:
         return FAT_PPM * self.b0 * GAMMA
