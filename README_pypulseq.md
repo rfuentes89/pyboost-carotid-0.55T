@@ -95,6 +95,9 @@ python scripts/optimize_fatsat.py --out fatsat_opt.png
 # Discrete sweeps of the integer parameters iNAV_lines and im_segments:
 python scripts/sweep_structure.py --out structure_sweep.png
 
+# Carotid image without vs with blood flow (complete-washout model):
+python scripts/image_flow_blackblood.py --out flow_vs_static.png
+
 # Run the test suite:
 python -m pytest tests/ -q
 ```
@@ -173,12 +176,36 @@ blood by inversion darkens the *whole vessel*, not the lumen selectively, becaus
 blood (T1≈1122 ms) and vessel **wall** (T1≈750 ms) are too close in T1 — at the
 blood-null TI the wall is dark too (lumen ≈ wall in every simulated contrast). The
 spatial image is therefore a T1-weighted IR picture (long-T1 vessel dark vs
-short-T1 muscle bright), **not** true black-blood. Real carotid black-blood
-suppresses the lumen through **flow** (blood physically leaves the imaging
-slice), which none of the available simulators model. **Bottom line: simulation
-here validates the prep-pulse and T1/relaxation physics; the flow-void lumen-vs-
-wall contrast that defines vessel-wall imaging can only be obtained on the
-scanner (or with a flowing-spin simulation).**
+short-T1 muscle bright), **not** true black-blood. Real carotid vessel-wall
+contrast separates lumen from wall through **flow** (blood physically leaves the
+imaging slice), which a static phantom cannot express. **Bottom line: with static
+spins the simulation validates the prep-pulse and T1/relaxation physics only —
+the lumen-vs-wall contrast needs a moving-spin model, which the next section
+adds.**
+
+## Blood flow: breaking the static ceiling (`pyboost.flow`, `image_flow_blackblood.py`)
+
+The ceiling above is a limitation of the *static phantom*, not of the method. The
+lumen-vs-wall contrast comes from **flow**, and `pyboost.flow` models it in the
+**complete through-plane washout limit** — during the readout the lumen holds
+spins that never saw the preparation — using only public MRzero API (no fork):
+
+1. **static compartment** (everything but blood) runs the *full* sequence;
+2. **blood compartment** runs a *preparation-stripped* copy: every preparation RF
+   pulse gets flip angle 0 while all delays, gradients and ADCs are untouched, so
+   blood arrives at the readout still at equilibrium;
+3. the two k-spaces **add** (same trajectory) and reconstruct as usual.
+
+Result: the degeneracy breaks. With the T2prep+IR contrast the lumen/wall ratio
+goes from **1.6 (static) to 4.2 (with flow)** — the lumen decouples from the wall,
+which no static simulation could produce.
+
+Direction of the effect: with blood arriving at thermal equilibrium this is
+*inflow enhancement* (a **brighter** lumen), the mechanism behind TOF and a real
+boost for bright-blood MRA. A **dark** lumen (true black-blood) additionally needs
+upstream tagging — a DIR module leaving inflowing blood inverted — which is the
+next step, together with the rigorous KomaMRI `FlowPath`/`spin_reset` model
+(genuine moving spins) and velocity-graded / pulsatile flow.
 
 ## Bright-blood MRA (`pyboost.mra`, `image_mra_phantom.py`)
 

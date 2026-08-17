@@ -14,6 +14,8 @@ from .prep import fat_sat, t2_prep, inversion
 from .readout import bssfp_readout
 from .boost import build_boost_sequence
 from .mra import build_mra_sequence
+from .flow import (compartment_maps, split_phantoms, locate_imaging_reps,
+                   locate_prep_pulses, strip_preparation, simulate_with_flow)
 from .diffopt import (import_mra_for_optimization, differentiable_flip_signal,
                       set_imaging_flip, locate_t2prep_delays, set_t2prep_te,
                       central_signal, locate_inav_ramp, set_imaging_flip_coupled,
@@ -39,4 +41,10 @@ __all__ = [
     "locate_inav_ramp",
     "set_imaging_flip_coupled",
     "locate_fatsat",
+    "compartment_maps",
+    "split_phantoms",
+    "locate_imaging_reps",
+    "locate_prep_pulses",
+    "strip_preparation",
+    "simulate_with_flow",
 ]

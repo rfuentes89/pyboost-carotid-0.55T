@@ -44,11 +44,15 @@ Full command list and the physics/optimization write-up: **[`README_pypulseq.md`
 
 ## Key findings (0.55T)
 
-- **Black-blood needs flow, not T1.** Blood (T1≈1122 ms) and vessel wall
-  (T1≈750 ms) are too close in T1, so inversion darkens the *whole vessel*, not
-  the lumen selectively. True black-blood relies on flow (blood leaving the
-  slice), which no available simulator models — simulation validates the
-  prep/relaxation physics, not the flow-void contrast.
+- **Lumen-vs-wall contrast needs flow, not T1.** Blood (T1≈1122 ms) and vessel
+  wall (T1≈750 ms) are too close in T1, so inversion darkens the *whole vessel*,
+  not the lumen selectively — with a **static** phantom the lumen and wall stay
+  degenerate.
+- **Modelling flow breaks that degeneracy.** `pyboost.flow` simulates the
+  complete-washout limit (the lumen refilled with spins that never saw the
+  preparation): the lumen/wall ratio jumps from **1.6 → 4.2**. With blood
+  arriving at equilibrium this is *inflow enhancement* (bright lumen); a dark
+  lumen additionally needs upstream tagging (DIR).
 - **Bright-blood MRA is fully simulatable** (relaxation-based): the long-T2 blood
   survives the T2-prep while muscle decays.
 - **MRzero can't simulate adiabatic pulses** (its PDG treats RF as instantaneous
