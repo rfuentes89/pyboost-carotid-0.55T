@@ -266,6 +266,23 @@ def test_set_react_ti_is_exact(system, tiny):
             pytest.approx(target, abs=1e-6)
 
 
+def test_set_react_ti_rejects_a_ti_the_inversion_cannot_fit_in(system, tiny):
+    """Below the pulse + spoiler the delay is negative; MRzero would run it anyway.
+
+    Regression: a TI sweep once included 5 and 7.8 ms, which are shorter than the
+    roughly 8-9 ms the inversion and its spoiler occupy, and reported contrast from
+    relaxation running backwards in time.
+    """
+    import torch
+    from pyboost.diffopt import import_react_for_optimization, set_react_ti
+    seq0, inv_idx, info = import_react_for_optimization(tiny, system)
+    base, pos = info[inv_idx[0]]
+    fixed = float(base.sum() - base[pos])
+    with pytest.raises(ValueError, match="negative"):
+        set_react_ti(seq0, inv_idx, info, torch.tensor(fixed * 0.5))
+    set_react_ti(seq0, inv_idx, info, torch.tensor(fixed + 1e-3))   # just above: fine
+
+
 def test_ti_is_differentiable(system, tiny):
     """Gradient must flow from the signal back to TI, or optimization is fake."""
     import torch

@@ -151,6 +151,14 @@ def set_react_ti(seq0, inv_idx: List[int], info: dict, ti: torch.Tensor) -> None
     for i in inv_idx:
         base_et, pos = info[i]
         others = base_et.sum() - base_et[pos]
+        # The delay is what remains of TI after the inversion pulse and its
+        # spoiler. Below that it would go negative -- relaxation running
+        # backwards -- and MRzero would simulate it without complaint, so refuse.
+        if float(ti) < float(others):
+            raise ValueError(
+                f"TI = {float(ti)*1e3:.1f} ms is shorter than the inversion pulse "
+                f"plus its spoiler ({float(others)*1e3:.1f} ms): the recovery delay "
+                f"would be negative.")
         # Rebuild by concatenation rather than in-place assignment so autograd
         # keeps a clean path from `ti` to the delay event.
         et = torch.cat([base_et[:pos], (ti - others).reshape(1),
