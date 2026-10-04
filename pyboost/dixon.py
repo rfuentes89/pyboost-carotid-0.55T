@@ -50,6 +50,7 @@ REACT's 162.6 deg is kept for traceability to the published 1.5T protocol
 
 from __future__ import annotations
 
+import heapq
 from typing import NamedTuple, Tuple
 
 import numpy as np
@@ -189,3 +190,181 @@ def synthesize_in_opposed(water: np.ndarray, fat: np.ndarray
     artifact rather than a real signal void.
     """
     return water + fat, np.abs(water - fat)
+
+
+def _wrap(delta: float, alias: float) -> float:
+    """|delta| folded into one alias period: the field map is only defined mod 1/dTE."""
+    return abs((delta + alias / 2.0) % alias - alias / 2.0)
+
+
+def _orient(pick: np.ndarray, psi: np.ndarray, alias: float, members: list) -> None:
+    """Fix the one global ambiguity of a grown component, in place.
+
+    Smoothness fixes every voxel *relative to the seed*, but cannot say whether
+    the whole component is right or swapped: flipping every voxel to its other
+    candidate shifts the field map by about the fat-water shift and is just as
+    smooth. The component is therefore oriented by the only prior available --
+    the field map is centred near zero after shimming -- measured as the
+    **median** of ``|psi|`` over the whole component for both labelings, and the
+    smaller one wins.
+
+    A *global* statistic is deliberate. Deciding from one seed voxel is unsound:
+    a pure-fat voxel at ``psi = +80 Hz`` is literally the same data as pure water
+    at 0 Hz, so any single voxel can sit exactly where the prior is blind. The
+    median over many voxels survives a localised excursion of the field map.
+    """
+    idx = tuple(np.array(members).T)
+    k = pick[idx].astype(int)
+    here = np.array([_wrap(psi[(int(kk),) + tuple(i)], alias)
+                     for kk, i in zip(k, members)])
+    other = np.array([_wrap(psi[(1 - int(kk),) + tuple(i)], alias)
+                      for kk, i in zip(k, members)])
+    if np.median(other) < np.median(here):
+        pick[idx] = ~pick[idx]
+
+
+def estimate_noise(magnitude: np.ndarray, k: float = 3.0,
+                   n_iter: int = 20) -> float:
+    """Noise sigma from the background of a magnitude image (Rayleigh).
+
+    Background magnitude is Rayleigh with ``E[x^2] = 2*sigma^2``. The estimate
+    iterates: take the voxels below ``k*sigma``, compute ``sqrt(mean(x^2)/2)``,
+    and divide out the bias that truncating at ``k*sigma`` introduces,
+    ``E[x^2 | x < k*sigma] = 2*sigma^2 * (1 - (k^2/2) e^{-k^2/2} / (1 - e^{-k^2/2}))``.
+
+    It starts from the median of the darkest quarter of the image. That start is
+    only a first guess -- it is biased high whenever less than all of the image
+    is background (by 1.5x at 47% background, measured) -- but because it errs
+    high, every background voxel is included on the first pass and the iteration
+    converges onto the true value without depending on the background fraction.
+
+    Needs *some* pure-background voxels. An image filled with tissue has none and
+    returns an overestimate; pass ``noise_sigma`` explicitly in that case.
+    """
+    flat = magnitude.reshape(-1).astype(float)
+    sigma = float(np.median(np.sort(flat)[: max(1, flat.size // 4)]) / 0.516)
+    e = np.exp(-k * k / 2.0)
+    bias = 1.0 - (k * k / 2.0) * e / (1.0 - e)
+    for _ in range(n_iter):
+        bg = flat[flat < k * sigma]
+        if bg.size < 8:
+            break
+        new = float(np.sqrt(np.mean(bg ** 2) / (2.0 * bias)))
+        if abs(new - sigma) <= 1e-9 * max(sigma, 1e-300):
+            sigma = new
+            break
+        sigma = new
+    return sigma
+
+
+def resolve_field_map(cand: Candidates, threshold: float = 0.05,
+                      noise_sigma: float | None = None,
+                      noise_k: float = 4.0) -> np.ndarray:
+    """Choose one candidate per voxel by region growing; ``True`` = fat-dominant.
+
+    A voxel cannot choose between its two candidates (both fit exactly), but the
+    field map is physically smooth, so a *wrong* choice shows up as a jump in
+    ``psi`` across the water/fat boundary. For a pure-species voxel the wrong
+    candidate is the right one displaced by exactly the fat-water shift
+    (~79.6 Hz), which is why the decision has to be made between regions.
+
+    Algorithm: starting from a seed, repeatedly resolve the unresolved voxel whose
+    best candidate has the smallest ``psi`` jump from an already-resolved
+    neighbour (a priority queue, so the most confident voxels are decided first
+    and noisy ones last). ``psi`` jumps are measured modulo the alias period.
+
+    **Assumption that real data must satisfy.** Smoothness cannot fix the
+    *global* ambiguity: swapping every voxel and shifting the whole field map by
+    the fat-water shift is perfectly smooth. It is broken with a prior -- the
+    field map is assumed centred near zero after shimming, tested as the median
+    of ``|psi|`` over each connected component (see :func:`_orient`). If a scan
+    violates that, e.g. an unshimmed offset near the fat-water shift, water and
+    fat come out swapped as a whole; ``tests/test_dixon.py`` documents this limit
+    rather than hiding it. A field map that spans more than one alias period
+    carries no such information at all, since its wrapped distribution is
+    uniform whatever the offset.
+
+    **Disconnected regions are resolved independently**, each seeded at its
+    brightest voxel with the same prior. An isolated component therefore gets no
+    help from its neighbours: a lone fat island is classified by its own
+    ``|psi|`` alone, and is only as reliable as that prior.
+
+    Voxels below the mask threshold are background: they are not resolved and
+    default to the water-dominant candidate (their amplitudes are ~0 anyway). The
+    threshold is the larger of ``threshold * max(|s1|)`` and ``noise_k * sigma``.
+    The noise term is not optional polish: with only a relative threshold,
+    background noise passes the mask once sigma approaches it, bridges separate
+    regions through voxels whose ``psi`` is random, and lets the noise decide how
+    a whole component is oriented -- measured as ~46% swapped voxels on 1 in 12
+    noise draws at SNR 33. ``sigma`` is estimated by :func:`estimate_noise`
+    unless ``noise_sigma`` is given.
+    """
+    mag = cand.magnitude
+    pick = np.zeros(mag.shape, dtype=bool)
+    sigma = estimate_noise(mag) if noise_sigma is None else noise_sigma
+    cut = max(threshold * mag.max(), noise_k * sigma)
+    mask = mag > cut if mag.max() > 0 else np.zeros_like(mag, bool)
+    if not mask.any():
+        return pick
+
+    psi, alias = cand.psi, cand.alias_hz
+    resolved = np.zeros(mag.shape, dtype=bool)
+    shape = mag.shape
+
+    def neighbours(idx):
+        for axis in range(len(shape)):
+            for step in (-1, 1):
+                j = list(idx)
+                j[axis] += step
+                if 0 <= j[axis] < shape[axis]:
+                    yield tuple(j)
+
+    members: list = []
+
+    def settle(idx, k):
+        pick[idx] = bool(k)
+        resolved[idx] = True
+        members.append(idx)
+        ref = psi[(k,) + idx]
+        for nb in neighbours(idx):
+            if mask[nb] and not resolved[nb]:
+                costs = [_wrap(psi[(c,) + nb] - ref, alias) for c in (0, 1)]
+                c = int(np.argmin(costs))
+                heapq.heappush(heap, (costs[c], nb, c))
+
+    heap: list = []
+    # Growth only crosses masked-in voxels, so a mask with several connected
+    # components needs one seed per component. Seeding only once silently leaves
+    # every other component at the water-dominant default -- right for a water
+    # region, wrong for a fat one -- so a test with one lucky seed can pass while
+    # the algorithm is broken.
+    while True:
+        todo = mask & ~resolved
+        if not todo.any():
+            break
+        members.clear()
+        seed = np.unravel_index(np.argmax(np.where(todo, mag, -1.0)), shape)
+        settle(seed, 0)                  # provisional; orientation is fixed below
+        while heap:
+            _, idx, c = heapq.heappop(heap)
+            if resolved[idx]:
+                continue
+            settle(idx, c)
+        _orient(pick, psi, alias, members)
+    return pick
+
+
+def select(cand: Candidates, pick: np.ndarray) -> Tuple[np.ndarray, np.ndarray,
+                                                        np.ndarray]:
+    """Apply a candidate choice, returning ``(water, fat, psi)``."""
+    return (np.where(pick, cand.water[1], cand.water[0]),
+            np.where(pick, cand.fat[1], cand.fat[0]),
+            np.where(pick, cand.psi[1], cand.psi[0]))
+
+
+def separate(s1: np.ndarray, s2: np.ndarray, te1: float, te2: float,
+             fat_freq: float, **kwargs) -> Tuple[np.ndarray, np.ndarray,
+                                                 np.ndarray]:
+    """Candidates -> spatial resolution -> ``(water, fat, psi)``."""
+    cand = separate_water_fat(s1, s2, te1, te2, fat_freq)
+    return select(cand, resolve_field_map(cand, **kwargs))
