@@ -67,13 +67,24 @@ def main() -> int:
     # _build_kernel refuses rather than mistime the echoes, so bandwidth is raised.
     ap.add_argument("--bandwidth", type=float, default=400.0, help="Hz/pixel")
     ap.add_argument("--out", default=None, help="optional PNG")
+    ap.add_argument("--ti", type=float, default=None,
+                    help="inversion time [ms] (default: the derived fat null, "
+                         "~84 ms). Past that null fat is positive while blood is "
+                         "still inverted, i.e. water and fat have opposite signs, "
+                         "e.g. --ti 155")
+    ap.add_argument("--signed", action="store_true",
+                    help="let water and fat have opposite signs in the Dixon "
+                         "solver (pyboost.dixon, signed=True); off by default "
+                         "because it is less robust when the two-point model "
+                         "does not hold exactly, see docs O12")
     args = ap.parse_args()
 
     n, fov = args.matrix, args.fov * 1e-3
     system = scanner_055T(max_grad=23.0, max_slew=25.0, rf_ringdown_time=20e-6)
     # Design shot structure (tfe_factor and shot_interval are ReactParams defaults).
     p = ReactParams(nx=n, ny=n, fov=fov, readout_bandwidth=args.bandwidth,
-                    dummy_shots=2, inversion_kind="block")
+                    dummy_shots=2, inversion_kind="block",
+                    ti=None if args.ti is None else args.ti * 1e-3)
     rep = kernel_report(system, p)
     df = fat_frequency(system)
     cond = conditioning(rep["te1"], rep["te2"], df)
@@ -141,11 +152,21 @@ def main() -> int:
     for label_, ok in checks.items():
         print(f"  [{'PASS' if ok else 'FAIL'}] {label_}")
 
-    water, fat, psi = separate(s1, s2, rep["te1"], rep["te2"], df)
+    water, fat, psi = separate(s1, s2, rep["te1"], rep["te2"], df,
+                               signed=args.signed)
     print("\nDixon output (illustrative only -- see the module docstring):")
     for k in ("blood", "muscle", "fat"):
         m = regions[k]
         print(f"  {k:7} mean W {water[m].mean():.4f}   mean F {fat[m].mean():.4f}")
+    # Species call per region: the fraction of voxels whose dominant species is
+    # the right one (water-like tissue -> W > F, fat -> F > W). The phantom has
+    # one species per region, so this is a classification check, not a quantitative
+    # separation check.
+    print("  voxels assigned to the right species:")
+    for k in ("blood", "wall", "muscle", "fat"):
+        m = regions[k]
+        right = (fat[m] > water[m]) if k == "fat" else (water[m] > fat[m])
+        print(f"    {k:7} {right.mean()*100:5.1f}% of {m.sum()}")
 
     if args.out:
         import matplotlib

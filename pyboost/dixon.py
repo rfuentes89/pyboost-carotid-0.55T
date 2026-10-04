@@ -38,18 +38,21 @@ Per voxel, with ``df`` the fat offset [Hz] and ``psi`` the field offset [Hz]::
 
     S_n = (W + F * exp(2j*pi*df*TE_n)) * exp(2j*pi*psi*TE_n) * exp(1j*phi0)
 
-Two complex measurements (four real numbers) against four unknowns
+with ``W`` and ``F`` real. They may have opposite signs (REACT's inversion can
+leave water negative while fat, past its null, is positive); see ``signed`` in
+:func:`separate_water_fat`. Two complex measurements (four real numbers) against four unknowns
 ``W, F, psi, phi0``: exactly determined, but with a discrete ambiguity.
 :func:`separate_water_fat` returns *both* solutions per voxel.
 
 Both solutions fit the data exactly
 -----------------------------------
 This is the honest statement of the two-point problem, and it holds at every
-echo spacing: a single voxel can never choose between its two candidates, so the
+echo spacing (for ``W`` and ``F`` of the same sign, or of either sign with
+``signed=True``): a single voxel can never choose between its two candidates, so the
 choice has to be made *spatially* (see :func:`resolve_field_map`). In particular
 180 deg is not a special degenerate angle -- the genuine degeneracy is ``W == F``,
-where the two solutions coincide, and it depends on the mixture, not on the echo
-times. The echo-time choice does matter for noise: see :func:`conditioning`.
+(or ``W == -F``) where the two solutions coincide, and it depends on the mixture,
+not on the echo times. The echo-time choice does matter for noise: see :func:`conditioning`.
 REACT's 162.6 deg is kept for traceability to the published 1.5T protocol
 (Isaak 2021), at a measured cost of about 1.2% more noise than 180 deg.
 
@@ -105,16 +108,17 @@ class Candidates(NamedTuple):
     Arrays are stacked on a leading axis of length 2: index 0 is the
     water-dominant solution, index 1 the fat-dominant one.
     """
-    water: np.ndarray       # (2, ...) non-negative amplitudes
-    fat: np.ndarray         # (2, ...)
+    water: np.ndarray       # (2, ...) |W|, non-negative
+    fat: np.ndarray         # (2, ...) |F|, non-negative
     psi: np.ndarray         # (2, ...) field offset [Hz], defined modulo alias_hz
     residual: np.ndarray    # (2, ...) magnitude misfit; ~0 for both, by construction
     alias_hz: float         # field-map ambiguity period, 1/dTE
     magnitude: np.ndarray   # |s1|, so a resolver can ignore background
+    opposed: np.ndarray | None = None   # (2, ...) True where W and F have opposite sign
 
 
 def separate_water_fat(s1: np.ndarray, s2: np.ndarray, te1: float, te2: float,
-                       fat_freq: float) -> Candidates:
+                       fat_freq: float, signed: bool = False) -> Candidates:
     """Both candidate water/fat solutions per voxel, in closed form.
 
     With ``p1 = exp(i(2*pi*psi*te1 + phi0))`` and ``b = exp(2j*pi*psi*dTE)``::
@@ -140,9 +144,31 @@ def separate_water_fat(s1: np.ndarray, s2: np.ndarray, te1: float, te2: float,
     special case. Amplitudes then follow from ``|s1| = |u + v*c1| * scale``,
     and the field map from the phase left over, ``b = r / rho``.
 
-    ``W`` and ``F`` are returned as non-negative amplitudes; the common phase
-    ``phi0`` is absorbed. If noise drives a root negative the pair is taken in
-    absolute value.
+    ``signed=False`` (default) takes ``abs()`` of the roots, i.e. assumes ``W`` and
+    ``F`` have the same sign. When they do not (``W=-1, F=0.5``) that returns a wrong
+    field map (-45 Hz error there) and a large residual.
+
+    ``signed=True`` keeps the signs: ``W`` and ``F`` are real and **may have opposite
+    signs**, which REACT's inversion produces (water negative, fat past its null
+    positive). They are returned as the non-negative amplitudes ``|W|`` and ``|F|``
+    (the water image REACT shows) together with ``opposed`` (``W*F < 0``). The
+    overall sign ``(W, F) -> (-W, -F)`` is absorbed in the unknown phase ``phi0`` and
+    cannot be recovered; only the relative sign can. The two roots have the same
+    sign, so the data fixes it and it adds no ambiguity.
+
+    **Why it is not the default.** ``signed=True`` is exact when the two-point model
+    holds, but it is less robust than ``abs()`` when it does not. The model has no
+    inter-echo decay (T2*), and on the MRzero carotid phantom (T2' = 30 ms, so
+    ``|s2/s1| ~ 0.77`` in pure tissue) the extra freedom is spent on explaining that
+    decay with a small opposite-sign species, and at the default TI, where fat sits
+    at its null and its voxels are near-degenerate mixtures, whole regions came out
+    swapped (blood classified correctly in 1.7% of voxels against 100% with
+    ``abs()``). At TI = 155 ms, where water and fat really do have opposite signs,
+    the two agree on which species dominates. See ``docs/react_literature.md``, O12.
+
+    Degenerate when ``t = +-1``, i.e. ``W == F`` or ``W == -F``: the two roots
+    coincide. A voxel with ``W + F*c1 ~ 0`` has almost no signal at echo 1 and
+    falls under the mask of :func:`resolve_field_map`.
     """
     s1 = np.asarray(s1, dtype=complex)
     s2 = np.asarray(s2, dtype=complex)
@@ -161,8 +187,14 @@ def separate_water_fat(s1: np.ndarray, s2: np.ndarray, te1: float, te2: float,
     q = -0.5 * (b + np.where(b >= 0, 1.0, -1.0) * sq)
 
     waters, fats, psis, residuals = [], [], [], []
+    opps = []
     for u, v in ((a, q), (q, a)):
-        u, v = np.abs(u), np.abs(v)
+        if not signed:
+            u, v = np.abs(u), np.abs(v)
+        # Signs are kept: W and F are real but may have opposite signs (REACT's
+        # inversion leaves water negative while fat, past its null, is positive).
+        # The two roots of the quadratic multiply to +1, so both candidates have
+        # the same sign of F/W and the data decides it -- no extra ambiguity.
         d1 = u + v * c1
         d2 = u + v * c2
         m1 = np.abs(d1)
@@ -172,15 +204,20 @@ def separate_water_fat(s1: np.ndarray, s2: np.ndarray, te1: float, te2: float,
         psi = np.angle(bph) / (2.0 * np.pi * dte)
 
         scale = np.where(ok, np.abs(s1) / np.where(ok, m1, 1.0), 0.0)
-        w, f = u * scale, v * scale
+        w, f = u * scale, v * scale          # signed; the global sign is not recoverable
         res = ((np.abs(w + f * c1) - np.abs(s1)) ** 2
                + (np.abs(w + f * c2) - np.abs(s2)) ** 2)
-        waters.append(w)
-        fats.append(f)
+        # Meaningful only when both species are present; a pure-water or pure-fat
+        # voxel has one of them at round-off level with an arbitrary sign.
+        both = np.minimum(np.abs(w), np.abs(f)) > 1e-9 * np.maximum(np.abs(w), np.abs(f))
+        opps.append((w * f < 0) & both)
+        waters.append(np.abs(w))
+        fats.append(np.abs(f))
         psis.append(psi)
         residuals.append(res)
 
-    water, fat, psi, res = (np.stack(x) for x in (waters, fats, psis, residuals))
+    water, fat, psi, res, opp = (np.stack(x) for x in
+                                 (waters, fats, psis, residuals, opps))
     swap = water[0] < fat[0]            # index 0 must be the water-dominant one
 
     def order(x):
@@ -188,19 +225,28 @@ def separate_water_fat(s1: np.ndarray, s2: np.ndarray, te1: float, te2: float,
 
     return Candidates(water=order(water), fat=order(fat), psi=order(psi),
                       residual=order(res), alias_hz=float(1.0 / dte),
-                      magnitude=np.abs(s1))
+                      magnitude=np.abs(s1), opposed=order(opp))
 
 
-def synthesize_in_opposed(water: np.ndarray, fat: np.ndarray
+def synthesize_in_opposed(water: np.ndarray, fat: np.ndarray,
+                          opposed: np.ndarray | None = None
                           ) -> Tuple[np.ndarray, np.ndarray]:
-    """In-phase and opposed-phase images built from W and F.
+    """In-phase and opposed-phase images built from |W|, |F| and their relative sign.
 
     Not cosmetic for REACT: the clinical literature uses them to *recognise*
     water/fat swaps. Pennig et al. (Clin Neuroradiol 2021) saw swap artifacts in
     10 of 35 patients at 3T and used the in-phase image to confirm each was an
     artifact rather than a real signal void.
+
+    With ``opposed`` true (W and F of opposite sign) the roles swap: the echo
+    where the species add is then ``|W| - |F|`` in magnitude, and the one where
+    they cancel is ``|W| + |F|``. ``opposed=None`` means same sign everywhere.
     """
-    return water + fat, np.abs(water - fat)
+    same = water + fat
+    diff = np.abs(water - fat)
+    if opposed is None:
+        return same, diff
+    return np.where(opposed, diff, same), np.where(opposed, same, diff)
 
 
 def _wrap(delta: float, alias: float) -> float:
@@ -373,9 +419,14 @@ def select(cand: Candidates, pick: np.ndarray) -> Tuple[np.ndarray, np.ndarray,
             np.where(pick, cand.psi[1], cand.psi[0]))
 
 
+def select_opposed(cand: Candidates, pick: np.ndarray) -> np.ndarray:
+    """Relative-sign flag of the chosen candidate (``True`` = W and F opposite)."""
+    return np.where(pick, cand.opposed[1], cand.opposed[0])
+
+
 def separate(s1: np.ndarray, s2: np.ndarray, te1: float, te2: float,
-             fat_freq: float, **kwargs) -> Tuple[np.ndarray, np.ndarray,
+             fat_freq: float, signed: bool = False, **kwargs) -> Tuple[np.ndarray, np.ndarray,
                                                  np.ndarray]:
     """Candidates -> spatial resolution -> ``(water, fat, psi)``."""
-    cand = separate_water_fat(s1, s2, te1, te2, fat_freq)
+    cand = separate_water_fat(s1, s2, te1, te2, fat_freq, signed=signed)
     return select(cand, resolve_field_map(cand, **kwargs))

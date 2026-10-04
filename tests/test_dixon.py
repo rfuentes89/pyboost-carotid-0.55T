@@ -271,3 +271,166 @@ def test_global_swap_is_a_documented_limit_of_the_prior(df):
     # the data are noise-free, so say so explicitly.
     w, f, _ = separate(s1, s2, TE1, TE2, df, noise_sigma=0.0)
     assert f.mean() > w.mean()     # called fat: the prior prefers psi near zero
+
+
+# --- Water and fat of opposite sign ------------------------------------------
+# REACT's inversion leaves water negative while fat, past its null, is positive.
+# W and F are real but of either sign; only the relative sign is observable (the
+# global sign is absorbed in the unknown phase phi0).
+
+from pyboost.dixon import select_opposed  # noqa: E402
+
+SIGNED = [(-1.0, 0.5), (-0.3, 1.0), (0.5, -1.0), (-1.0, 0.1), (-0.2, 1.5),
+          (1.0, 0.5), (-1.0, -0.5)]
+
+
+@pytest.mark.parametrize("w,f", SIGNED)
+def test_opposite_sign_pairs_are_recovered_exactly(df, w, f):
+    """Regression: the solver took abs() of its roots and returned, for
+    W=-1, F=0.5, a water of 1.52 and a field-map error of -45 Hz."""
+    psi = 5.0
+    cand = separate_water_fat(*[np.array([x]) for x in forward(np.array([w]),
+                                                               np.array([f]),
+                                                               np.array([psi]), df)],
+                              TE1, TE2, df, signed=True)
+    assert np.allclose(cand.residual, 0.0, atol=1e-12)        # both candidates fit
+    alias = cand.alias_hz
+    hits = 0
+    for k in (0, 1):
+        ok_amp = (np.isclose(cand.water[k, 0], abs(w), atol=1e-9)
+                  and np.isclose(cand.fat[k, 0], abs(f), atol=1e-9))
+        err = (cand.psi[k, 0] - psi + alias / 2) % alias - alias / 2
+        if ok_amp and abs(err) < 1e-6:
+            hits += 1
+            assert bool(cand.opposed[k, 0]) == (w * f < 0)
+    assert hits == 1, "exactly one candidate is the truth"
+
+
+def test_both_candidates_agree_on_the_relative_sign(df):
+    """The roots t and 1/t have the same sign, so the data fixes it."""
+    s = forward(np.array([-0.3]), np.array([1.0]), np.array([5.0]), df)
+    cand = separate_water_fat(s[0], s[1], TE1, TE2, df, signed=True)
+    assert cand.opposed[0, 0] == cand.opposed[1, 0] == True  # noqa: E712
+
+
+def test_pure_species_is_not_flagged_as_opposed(df):
+    for w, f in ((1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)):
+        s = forward(np.array([w]), np.array([f]), np.array([5.0]), df)
+        cand = separate_water_fat(s[0], s[1], TE1, TE2, df, signed=True)
+        assert not cand.opposed.any()
+
+
+def test_w_equals_minus_f_is_degenerate_without_nans(df):
+    """t = -1: the two roots coincide, like W == F."""
+    s = forward(np.array([-1.0]), np.array([1.0]), np.array([5.0]), df)
+    cand = separate_water_fat(s[0], s[1], TE1, TE2, df, signed=True)
+    assert np.isfinite(cand.water).all() and np.isfinite(cand.psi).all()
+    assert np.allclose(cand.water[0], cand.water[1], atol=1e-6)
+
+
+def _signed_object(df, noise=0.0, seed=0, n=48, mixed_wf=(-0.9, 0.1)):
+    """Negative water disc, positive fat ring, and a mixed ring between them."""
+    y, x = np.mgrid[0:n, 0:n]
+    cy = cx = (n - 1) / 2
+    r = np.hypot(y - cy, x - cx)
+    water = np.where(r < n * 0.28, -1.0, 0.0)
+    fat = np.where((r >= n * 0.32) & (r < n * 0.44), 1.0, 0.0)
+    mixed = (r >= n * 0.28) & (r < n * 0.32)
+    water = np.where(mixed, mixed_wf[0], water)    # partial volume, opposite signs
+    fat = np.where(mixed, mixed_wf[1], fat)
+    psi = 30.0 * ((x - cx) / n + 0.5 * (y - cy) / n)
+    s1, s2 = forward(water, fat, psi, df)
+    if noise:
+        rng = np.random.default_rng(seed)
+        for s in (s1, s2):
+            s += noise * (rng.standard_normal(s.shape)
+                          + 1j * rng.standard_normal(s.shape))
+    return water, fat, psi, s1, s2
+
+
+def test_spatial_resolution_with_opposite_signs(df):
+    water, fat, psi, s1, s2 = _signed_object(df)
+    cand = separate_water_fat(s1, s2, TE1, TE2, df, signed=True)
+    pick = resolve_field_map(cand)
+    w, f, est = select(cand, pick)
+    opp = select_opposed(cand, pick)
+    tissue = (np.abs(water) + np.abs(fat)) > 0
+    assert np.allclose(w[tissue], np.abs(water[tissue]), atol=1e-6)
+    assert np.allclose(f[tissue], np.abs(fat[tissue]), atol=1e-6)
+    truth_opp = (water * fat < 0)
+    assert (opp[tissue] == truth_opp[tissue]).all()
+    alias = 1.0 / (TE2 - TE1)
+    err = (est[tissue] - psi[tissue] + alias / 2) % alias - alias / 2
+    assert np.abs(err).max() < 1e-6
+
+
+@pytest.mark.parametrize("noise", [0.01, 0.03])
+def test_opposite_sign_swaps_stay_rare_under_noise(df, noise):
+    worst = 0.0
+    for seed in range(8):
+        # No mixed ring here: partial-volume bridging is a separate limit, see below.
+        water, fat, psi, s1, s2 = _signed_object(df, noise=noise, seed=seed,
+                                                 mixed_wf=(0.0, 0.0))
+        w, f, _ = separate(s1, s2, TE1, TE2, df, signed=True)
+        worst = max(worst, _swap_fraction(w, f, np.abs(water), np.abs(fat)))
+    assert worst < 0.05, f"worst of 8 draws: {worst:.1%} swapped"
+
+
+def test_synthesized_images_swap_roles_when_signs_oppose():
+    w, f = np.array([1.0, 1.0]), np.array([0.3, 0.3])
+    opp = np.array([False, True])
+    in_phase, opposed = synthesize_in_opposed(w, f, opp)
+    assert np.allclose(in_phase, [1.3, 0.7])       # species add / cancel
+    assert np.allclose(opposed, [0.7, 1.3])
+    assert np.allclose(synthesize_in_opposed(w, f)[0], [1.3, 1.3])   # old behaviour
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Known limit of the region growing, independent of sign: a partial-volume "
+    "ring between water and fat can bridge the two regions through voxels whose "
+    "wrong candidate has a smooth field map, and a whole region comes out swapped. "
+    "Measured on this object: mixture (0.5, 0.5) swaps 664 of 1396 voxels, "
+    "(-0.7, 0.3) swaps 560; with noise 0.01 even (0.9, 0.1) and (-0.9, 0.1) swap "
+    "about 11% in 8 of 8 draws, same-sign and opposite-sign alike. The same "
+    "objects without the ring resolve exactly."))
+@pytest.mark.parametrize("mixed,noise", [((0.5, 0.5), 0.0), ((-0.7, 0.3), 0.0),
+                                         ((0.9, 0.1), 0.01), ((-0.9, 0.1), 0.01)])
+def test_partial_volume_bridge_does_not_swap_a_region(df, mixed, noise):
+    water, fat, psi, s1, s2 = _signed_object(df, mixed_wf=mixed, noise=noise)
+    if mixed[0] > 0:                       # same-sign variant of the same object
+        water = np.abs(water)
+        s1, s2 = forward(water, fat, psi, df)
+        if noise:
+            rng = np.random.default_rng(0)
+            for x in (s1, s2):
+                x += noise * (rng.standard_normal(x.shape)
+                              + 1j * rng.standard_normal(x.shape))
+    w, f, _ = separate(s1, s2, TE1, TE2, df, signed=True)
+    assert _swap_fraction(w, f, np.abs(water), np.abs(fat)) == 0
+
+
+def test_default_keeps_the_same_sign_assumption(df):
+    """signed=False is the previous behaviour: exact for same-sign pairs, and a
+    wrong answer with a large residual for opposite-sign ones. That is why the
+    opposite-sign path is an explicit option (see the docstring and O12)."""
+    same = forward(np.array([1.0]), np.array([0.5]), np.array([5.0]), df)
+    opp = forward(np.array([-1.0]), np.array([0.5]), np.array([5.0]), df)
+    c_same = separate_water_fat(same[0], same[1], TE1, TE2, df)
+    c_opp = separate_water_fat(opp[0], opp[1], TE1, TE2, df)
+    assert np.allclose(c_same.residual, 0.0, atol=1e-12)
+    assert c_opp.residual.min() > 0.1
+    assert not c_opp.opposed.any()
+
+
+def test_inter_echo_decay_makes_signed_less_forgiving_than_abs(df):
+    """Documents why signed is not the default. A pure water voxel whose echo 2
+    has decayed (T2*, not in the model) is explained by a small opposite-sign fat;
+    abs() forces a same-sign one. Amplitudes are similar, the field-map candidates
+    are not."""
+    s1, s2 = forward(np.array([1.0]), np.array([0.0]), np.array([5.0]), df)
+    s2 = s2 * 0.9
+    a = separate_water_fat(s1, s2, TE1, TE2, df)
+    b = separate_water_fat(s1, s2, TE1, TE2, df, signed=True)
+    assert abs(a.fat[0, 0] - b.fat[0, 0]) < 0.05           # similar contamination
+    assert bool(b.opposed[0, 0]) and not bool(a.opposed[0, 0])
+    assert abs(a.psi[0, 0] - b.psi[0, 0]) > 5.0            # different field map
