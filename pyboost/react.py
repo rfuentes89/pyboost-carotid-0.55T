@@ -51,9 +51,10 @@ def encode_order(p: ReactParams) -> List[Tuple[int, int]]:
     """Full ``(ky, kz)`` encode list in acquisition order.
 
     With ``centric`` ordering the encodes are sorted by distance from the centre
-    of k-space, so the shots that matter most for contrast sample DC first. This
-    is not cosmetic: the prepared magnetization recovers throughout the shot, so
-    whatever is acquired late carries progressively less of the REACT contrast.
+    of k-space. This is not cosmetic: the prepared magnetization recovers
+    throughout the shot, so whatever is acquired late carries progressively less
+    of the REACT contrast. :func:`shot_encodes` decides how this list is divided
+    between shots.
     """
     encodes = [(ky, kz) for kz in range(p.nz) for ky in range(p.ny)]
     if p.centric:
@@ -63,8 +64,28 @@ def encode_order(p: ReactParams) -> List[Tuple[int, int]]:
 
 
 def shot_encodes(shot: int, p: ReactParams) -> List[Tuple[int, int]]:
-    """The encodes acquired in one shot (contiguous slice of ``encode_order``)."""
+    """The encodes acquired in one shot.
+
+    With ``centric`` ordering the shots are *interleaved* through the
+    centre-sorted list: shot ``s`` takes entries ``s, s+N, s+2N, ...`` (``N`` =
+    ``p.n_shots``). Every shot therefore starts next to the centre of k-space and
+    climbs to high spatial frequencies, so the decay of the prepared
+    magnetization along the train weights k-space as a smooth function of radius.
+    Handing each shot a contiguous block instead puts the centre in shot 0 only
+    and makes that weighting a sawtooth that resets every ``tfe_factor`` lines.
+
+    This is an interpretation, not a published algorithm: Gietzen 2025 describes
+    a "low-high" profile order in which every shot starts close to the centre of
+    k-space and gives no rule for dividing the encodes between shots, and no
+    0.55T paper found describes the order of a REACT-type readout. Without
+    ``centric`` the shots are contiguous slices of the raster order.
+
+    The train is ``ceil(n_encodes / n_shots)`` lines long, which can be shorter
+    than ``tfe_factor`` (120 encodes at ``tfe_factor=22`` give 6 shots of 20).
+    """
     order = encode_order(p)
+    if p.centric:
+        return order[shot::p.n_shots]
     start = shot * p.tfe_factor
     return order[start:start + p.tfe_factor]
 

@@ -202,6 +202,44 @@ def test_centric_order_starts_at_kspace_centre():
     assert abs(first[0] - p.ny / 2) <= 1
 
 
+def _radius(e, p):
+    return (abs(e[0] - p.ny / 2) ** 2 + abs(e[1] - p.nz / 2) ** 2) ** 0.5
+
+
+def test_every_shot_starts_next_to_the_kspace_centre():
+    """Gietzen 2025: every shot starts close to the centre of k-space."""
+    p = ReactParams(ny=120, nz=1, tfe_factor=22, centric=True)
+    ranked = sorted(encode_order(p), key=lambda e: _radius(e, p))
+    nearest = set(ranked[:p.n_shots + 2])      # ties at equal radius may reorder
+    for s in range(p.n_shots):
+        assert shot_encodes(s, p)[0] in nearest
+
+
+def test_radius_grows_within_every_shot():
+    p = ReactParams(ny=120, nz=1, tfe_factor=22, centric=True)
+    for s in range(p.n_shots):
+        r = [_radius(e, p) for e in shot_encodes(s, p)]
+        assert r == sorted(r)
+
+
+def test_shots_see_the_same_radius_at_the_same_train_position():
+    """No sawtooth: at a given position in the train every shot samples about
+    the same radius, so the decay along the train maps smoothly onto k-space.
+    A contiguous split gives radii that differ by tens of lines between shots."""
+    p = ReactParams(ny=120, nz=1, tfe_factor=22, centric=True)
+    shots = [[_radius(e, p) for e in shot_encodes(s, p)] for s in range(p.n_shots)]
+    for pos in range(min(map(len, shots))):
+        at_pos = [r[pos] for r in shots]
+        assert max(at_pos) - min(at_pos) <= p.n_shots   # within one interleave step
+
+
+def test_train_length_is_ceil_of_encodes_per_shot():
+    p = ReactParams(ny=120, nz=1, tfe_factor=22, centric=True)
+    lens = {len(shot_encodes(s, p)) for s in range(p.n_shots)}
+    assert max(lens) <= p.tfe_factor
+    assert sum(len(shot_encodes(s, p)) for s in range(p.n_shots)) == p.n_encodes
+
+
 def test_shots_partition_all_encodes():
     p = ReactParams(ny=32, nz=2, tfe_factor=8)
     seen = [e for s in range(p.n_shots) for e in shot_encodes(s, p)]
