@@ -23,16 +23,16 @@ therefore contrast per unit sqrt(time)::
 maximum; the optimization runs on ``sqrt(T_shot)`` and the reported optimum is
 independent of matrix size.
 
-Why a sweep and not plain gradient descent
-------------------------------------------
-The efficiency landscape is **not unimodal**. There is a local maximum near
-700 ms -- the point where fat has recovered just enough for the inversion to
-null it properly -- then a dip around 900-1100 ms where muscle recovers faster
-than blood, and only past ~1.4 s does blood's slow T1 recovery take over and
-drive efficiency to its true maximum near 3 s. Gradient descent started at the
-1 s default converges into the 700 ms basin and reports it as the answer; it is
-about 24% worse than the global optimum. So this script sweeps coarsely first
-and only then refines locally.
+Steady state matters more than the optimizer
+---------------------------------------------
+An earlier version of this script reported a decoy local maximum near 700-800 ms
+and warned that gradient descent would fall into it. That decoy was a transient
+artefact: with only 2 preparations before the measured one, blood (T1 1122 ms)
+has not reached steady state at intervals below ~1.5 s, so the early rows read
+too high. With enough dummy shots (default 12; 8 is within ~1% at 500 ms)
+efficiency rises monotonically to a broad maximum at 2.5-3 s and the decoy is
+gone. The sweep is kept, as a cheap way to see the whole curve, but it is no
+longer justified by multi-modality.
 
 Analytic anchor
 ---------------
@@ -88,13 +88,18 @@ def analytic_optimum(t1: float) -> float:
     return 0.5 * (lo + hi) * t1
 
 
-def measure(seq0, rec_idx, info, overhead, interval, objs, nx):
-    """Contrast and efficiency at a given shot interval. Differentiable."""
+def measure(seq0, rec_idx, info, overhead, interval, objs, nx, objective="full"):
+    """Contrast and efficiency at a given shot interval. Differentiable.
+
+    ``objective="water"`` is blood - muscle: what the Dixon water image shows,
+    since REACT removes fat in reconstruction. ``"full"`` also subtracts fat,
+    which is the earlier objective (a single magnitude image with no Dixon).
+    """
     set_react_shot_interval(seq0, rec_idx, info, overhead, interval)
     blood = react_dc_signal(seq0, objs["blood"], nx).abs()
     muscle = react_dc_signal(seq0, objs["muscle"], nx).abs()
     fat = react_dc_signal(seq0, objs["fat"], nx).abs()
-    contrast = blood - muscle - fat
+    contrast = blood - muscle - (fat if objective == "full" else 0.0)
     return contrast / torch.sqrt(interval), contrast, blood, muscle, fat
 
 
@@ -111,14 +116,21 @@ def main() -> int:
     ap.add_argument("--max-scan", type=float, default=None,
                     help="scan-time ceiling [s]; also report the best interval "
                          "that fits it for the full protocol")
-    ap.add_argument("--dummy-shots", type=int, default=2,
+    ap.add_argument("--dummy-shots", type=int, default=12,
                     help="preparations before the measured one (steady state)")
+    ap.add_argument("--objective", choices=("water", "full"), default="full",
+                    help="water: blood - muscle (Dixon water image); full: also "
+                         "subtract fat (single magnitude image)")
+    ap.add_argument("--ti", type=float, default=None,
+                    help="inversion time [ms] (default: the derived one)")
     args = ap.parse_args()
 
     system = scanner_055T(max_grad=23.0, max_slew=25.0, rf_ringdown_time=20e-6)
     p = ReactParams(nx=16, ny=8, tfe_factor=8, dummy_shots=args.dummy_shots)
     seq0, inv_idx, inv_info = import_react_for_optimization(p, system)
-    set_react_ti(seq0, inv_idx, inv_info, torch.tensor(float(p.resolved_ti())))
+    ti = args.ti * 1e-3 if args.ti is not None else float(p.resolved_ti())
+    print(f"objective: {args.objective}, TI = {ti*1e3:.1f} ms")
+    set_react_ti(seq0, inv_idx, inv_info, torch.tensor(ti))
     rec_idx, rec_info, overhead = locate_react_recovery(seq0, p.flip_angle)
     if not rec_idx:
         print("No recovery repetitions found -- need at least 2 shots.")
@@ -132,7 +144,7 @@ def main() -> int:
     print(f"analytic anchor (pure T1 recovery): {anchor*1e3:.0f} ms")
     print(f"current default: {ReactParams().shot_interval*1e3:.0f} ms\n")
 
-    # --- Coarse sweep: the landscape has a decoy local maximum ------------
+    # --- Sweep: shows the whole curve, not just its maximum ---------------
     print(f"{'T_shot [ms]':>12}{'blood':>9}{'muscle':>9}{'fat':>9}"
           f"{'contrast':>10}{'efficiency':>12}")
     grid = np.linspace(args.lo, args.hi, args.n)
@@ -140,7 +152,8 @@ def main() -> int:
     for ms in grid:
         with torch.no_grad():
             eff, c, b, m, f = measure(seq0, rec_idx, rec_info, overhead,
-                                      torch.tensor(float(ms) * 1e-3), objs, p.nx)
+                                      torch.tensor(float(ms) * 1e-3), objs, p.nx,
+                                      args.objective)
         rows.append((float(ms) * 1e-3, eff.item(), c.item(), b.item()))
         print(f"{ms:>12.0f}{b.item():>9.4f}{m.item():>9.4f}{f.item():>9.4f}"
               f"{c.item():>10.4f}{eff.item():>12.4f}")
@@ -154,7 +167,7 @@ def main() -> int:
         for _ in range(args.steps):
             opt.zero_grad()
             eff, c, b, _, _ = measure(seq0, rec_idx, rec_info, overhead, t,
-                                      objs, p.nx)
+                                      objs, p.nx, args.objective)
             (-eff).backward()
             if eff.item() > best_eff:
                 best_t, best_eff, best_c, best_b = (float(t.item()), eff.item(),
@@ -166,17 +179,8 @@ def main() -> int:
 
     with torch.no_grad():
         eff_d, c_d, b_d, _, _ = measure(seq0, rec_idx, rec_info, overhead,
-                                        torch.tensor(1.0), objs, p.nx)
-
-    # Flag the decoy so a future reader does not "fix" this back to descent.
-    early = [r for r in rows if r[0] < 1.2]
-    if early:
-        loc_t, loc_eff, _, _ = max(early, key=lambda r: r[1])
-        if loc_eff < best_eff and loc_t < best_t:
-            print(f"\nNOTE: there is a local efficiency maximum at "
-                  f"{loc_t*1e3:.0f} ms ({loc_eff:.4f}), {(1-loc_eff/best_eff)*100:.0f}% "
-                  f"below the global one. Gradient descent from the 1 s default "
-                  f"lands there.")
+                                        torch.tensor(1.0), objs, p.nx,
+                                        args.objective)
 
     print(f"\nbest T_shot = {best_t*1e3:.0f} ms  "
           f"(= {best_t/t1_blood:.1f} x blood T1; analytic anchor "
