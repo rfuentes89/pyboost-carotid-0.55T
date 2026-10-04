@@ -10,7 +10,7 @@ plan); ScienceDirect, PMC web and Europe PMC were blocked by the proxy.
 direct reference at this field strength.
 
 Read in full: Isaak 2021, Pennig 2020 (stroke, CHD), Gietzen 2025, Erdem 2025.
-Abstract only: Yoneyama 2019, Berglund 2011, Eggers 2011, Eggers 2014, Khodarahmi 2024,
+Abstract only (Paredes 2025 and Pedraza 2025 are used above but their read status was not recorded; treat as abstract-level; Khodarahmi's ~47% applies to non-fluid tissues and its use for fat is an extrapolation): Yoneyama 2019, Berglund 2011, Eggers 2011, Eggers 2014, Khodarahmi 2024,
 Campbell-Washburn 2019, Castillo-Passi 2024, Pedraza 2025, Tian 2023.
 
 ## Verified
@@ -22,7 +22,7 @@ Campbell-Washburn 2019, Castillo-Passi 2024, Pedraza 2025, Tian 2023.
 | T2-prep 50 ms at 1.5T/3T | Isaak, Pennig (stroke), Erdem, Gietzen (table) |
 | Neck protocol untriggered (3T, 2:46 min); thoracic uses ECG + navigator | Pennig (stroke); Isaak, Gietzen |
 | Echo times semi-flexible, set by the scanner to the minimum | Yoneyama (abstract), Erdem |
-| Each shot starts near the k-space centre ("low-high profile order") | Gietzen |
+| Each shot starts near the k-space centre ("low-high profile order") | Gietzen (described there; **our `encode_order` does not do it**, see O11) |
 | Water/fat swaps are common (16%, 29%, 40%) and detected on in/opposed-phase | Isaak, Pennig (stroke), Gietzen |
 | Two-point Dixon with flexible TEs: field-map ambiguity, noise vs Cramer-Rao bound | Berglund 2011 |
 | Region growing for water/fat separation at 0.55T | Tian 2023 (ISMRM) |
@@ -63,7 +63,11 @@ Campbell-Washburn 2019, Castillo-Passi 2024, Pedraza 2025, Tian 2023.
 | O6 | Flow-induced swaps: DTE is 2.7x longer than at 1.5T. | My hypothesis, unverified; synthetic validation has no flow. |
 | O7 | Single-peak fat model. | Eggers 2011 reports multi-peak reduces variability. |
 | O8 | Monopolar readout; Pedraza 2025 uses bipolar for Dixon cMRF at 0.55T. | Defensible, not backed by a source read. |
-| O9 | Vector slew peaks at 27.4 T/m/s vs 25 per axis. | Check PNS/scanner limit. |
+| O9 | Vector slew peaks at 27.4 T/m/s vs 25 per axis. | Low priority: Siemens limits slew per axis and runs its own stimulation check. |
+| O10 | **TI / shot-interval objective sees only the first TR.** `react_dc_signal` returns the k-space-centre sample, acquired in TR 0 of the first shot, so it scores `abs(Mz(TI))` and ignores the decay over the 22-TR train. An independent analytic steady-state model (not in the repo) reproduces the MRzero ranking for that metric, so the simulation is right and the metric is the issue; averaged over the shot the order reverses (short TI best, TI 155 ms worst). This is the likely explanation of the "short TI is worse" contradiction. | Review finding, centre-of-k-space part verified in code; the shot-averaged numbers are the reviewer's model and unverified. The 155 ms, 84 ms and 2.5-3 s figures above are provisional until re-scored on a vessel-sized object over the whole shot. |
+| O11 | **Segmented-centric ordering.** `encode_order` sorts all encodes by distance from the centre and hands each shot a contiguous block: shot 0 starts at ky 60 (centre), shot 1 at 71, shot 2 at 82 (verified by running it). The weighting along ky is a sawtooth, which can ghost. A low-high order needs the shots interleaved. | Verified; not fixed. |
+| O12 | **Two-point Dixon assumes water and fat of the same sign.** The inversion can leave water negative and fat near zero or positive. Verified on synthetic voxels (TE 4.18/9.85 ms, +5 Hz): W=-1, F=0.5 returns water 1.52 and a field map error of -45 Hz; W=-0.3, F=1 returns -76 Hz. The fit residual is large (0.68, 0.23) so it is detectable, but nothing checks it. The "both candidates fit exactly" statement in `dixon.py` holds only for same-sign pools. | Verified; not fixed. |
+| O13 | Library default `scanner_055T()` is 26 mT/m, 45 T/m/s, above the user's 23/25. REACT's own fallback now uses 23/25/20 us; BOOST/MRA still use the library default. | REACT fixed; BOOST/MRA are the user's call. |
 
 ## References
 

@@ -131,7 +131,9 @@ class ReactParams:
     # measured to (the start of the shot, or the k-space centre) is not stated in
     # the papers that could be read, so these numbers are not directly comparable
     # to the TI used here, which is measured to the first excitation with centric
-    # ordering (Gietzen 2025 confirms every shot starts near the k-space centre).
+    # ordering. Gietzen 2025 describes a low-high profile order in which every
+    # shot starts near the k-space centre; NOTE that ``encode_order`` does not
+    # yet do that (only shot 0 starts at the centre), see docs/react_literature.md.
     # T1 is also ~32% shorter on average at 0.55T (Campbell-Washburn 2019, an
     # average over tissues). Left as None so it is computed from the relaxation
     # table via :func:`null_time_after_t2prep` -- see ``ti_null_tissue``.
@@ -181,11 +183,13 @@ class ReactParams:
     # that seemed natural, that is +144% contrast and +105% blood signal for a
     # 6 s -> 18 s scan on the 2D protocol.
     #
-    # Two warnings. (1) The efficiency landscape is NOT unimodal -- there is a
-    # decoy local maximum near 800 ms, 25% worse, which plain gradient descent
-    # from 1 s converges to. (2) In 3D the shot count multiplies by nz, so this
-    # default can make the scan impractically long; re-run the optimizer with
-    # --max-scan to maximize contrast under a scan-time ceiling instead.
+    # Two warnings. (1) The objective is the k-space-centre signal only, so it
+    # sees the first TR of a shot and not the decay of the prepared magnetization
+    # over the whole train; treat 3.0 s as provisional (docs/react_literature.md,
+    # O10). An earlier "decoy maximum near 800 ms" was a non-steady-state
+    # artefact and no longer exists. (2) In 3D the shot count multiplies by nz,
+    # so this default can make the scan impractically long; re-run the optimizer
+    # with --max-scan to maximize contrast under a scan-time ceiling instead.
     shot_interval: float = 3.0           # time from one preparation to the next [s]
     dummy_shots: int = 2                 # shots run without ADC to reach steady state
     centric: bool = True                 # centre of k-space right after the TI

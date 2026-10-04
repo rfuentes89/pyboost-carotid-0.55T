@@ -17,7 +17,7 @@ of flow and free of any triggering:
   spectral fat-sat would fail.
 
 Unlike :mod:`pyboost.boost` and :mod:`pyboost.mra` this sequence emits **no ECG
-trigger**: the published neck protocol (Pennig et al., Clin Neuroradiol 2021,
+trigger**: the published neck protocol (Pennig et al., Clin Neuroradiol 2020,
 fixed 2:46 min scan) is explicitly untriggered, which is the "without ... and
 Triggering" in the name.
 
@@ -93,7 +93,10 @@ def build_react_sequence(p: ReactParams | None = None,
     """
     from .system import scanner_055T
     if system is None:
-        system = scanner_055T()
+        # The user-supplied limits for this scanner, not the library default
+        # (26 mT/m, 45 T/m/s), which exceeds them and is shared with BOOST/MRA.
+        system = scanner_055T(max_grad=23.0, max_slew=25.0,
+                              rf_ringdown_time=20e-6)
     if p is None:
         p = ReactParams()
 
