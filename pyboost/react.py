@@ -127,7 +127,8 @@ def build_react_sequence(p: ReactParams | None = None,
 
         preps: Blocks = []
         if use_t2prep:
-            preps += t2_prep(system, te=p.t2prep_duration, trf=p.trf)
+            preps += t2_prep(system, te=p.t2prep_duration, trf=p.trf,
+                             n_refocus=p.t2prep_refocus)
         if use_inversion:
             # `inversion` builds [180, spoiler, delay]; the delay it is given is
             # what remains of TI after the pulse and its spoiler, so TI ends

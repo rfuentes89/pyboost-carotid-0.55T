@@ -97,11 +97,25 @@ class ReactParams:
     :class:`BoostParams`.
     """
 
-    # --- Preparation (published REACT values, identical at 1.5T and 3T) ---
-    # T2-prep 50 ms: Pennig 2020 (Clin Neuroradiol, 3T) and Isaak 2021 (JCMR,
-    # 1.5T). Independently corroborated at 0.55T by Castillo-Passi et al.,
-    # MRM 2024, whose whole-heart CMRA at this field also uses 50 ms.
+    # --- Preparation ---
+    # T2-prep 50 ms. Read in full text: Isaak 2021 (1.5T), Erdem 2025 (1.5T) and
+    # Gietzen 2025 (1.5T, table: 50 ms with 4 refocusing pulses); Pennig 2020
+    # stroke (3T) gives 50 ms too. It is NOT universal: the "modified REACT"
+    # (Pennig 2020, congenital heart disease) uses 30 ms and no inversion at all,
+    # and Gietzen's own text (30 ms, no inversion) contradicts its table.
+    # NOT confirmed at 0.55T. An earlier version of this comment cited
+    # Castillo-Passi 2024 (whole-heart CMRA at 0.55T) as corroboration; its
+    # abstract reports the flip angle (110 deg), fat-sat angle (180 deg) and 6
+    # iNAV lines, but not a T2-prep duration, so that attribution was unsupported
+    # and has been removed. Treat 50 ms as the 1.5T/3T REACT value carried over.
     t2prep_duration: float = 50e-3
+    # Refocusing pulses in the T2-prep. REACT is described with 4 (Gietzen 2025
+    # Table 1; Erdem 2025 calls it "four adiabatic-based"). Here they are hard
+    # pulses with the MLEV phase pattern (see prep.t2_prep), so only the count and
+    # the phase cycling follow the literature, not the pulse shape. With ideal
+    # pulses the contrast is the same as one refocusing; the benefit is B1/B0
+    # robustness on the scanner, which the MRzero simulation cannot show.
+    t2prep_refocus: int = 4
     trf: float = 500e-6                  # hard-pulse duration [s] (user's scanner)
     inversion_kind: str = "block"        # "block" (MRzero-simulatable) | "adiabatic" (scanner)
     # Optional spectral fat saturation. REACT relies on Dixon instead, so this is
@@ -110,18 +124,30 @@ class ReactParams:
     fatsat_duration: float = 26.624e-3
     fatsat_flip_angle: float = 180.0
 
-    # TI. DERIVED, and the only parameter with no usable literature anchor: the
-    # single published value is "~70 ms" at 1.5T (Isaak 2021), and T1 is ~32%
-    # shorter at 0.55T (Campbell-Washburn, Radiology 2019). Left as None so it is
-    # computed from the measured 0.55T relaxation table via
-    # :func:`null_time_after_t2prep` -- see ``ti_null_tissue``.
+    # TI. DERIVED, and the literature does NOT give one value to anchor it. The
+    # "inversion delay" reported at 1.5T is 7.8 ms for the original REACT and
+    # 12.2 ms for MTC-REACT (Erdem 2025, where the latter is the shortest the
+    # scanner allows), but about 70 ms in Isaak 2021 Table 1. What the delay is
+    # measured to (the start of the shot, or the k-space centre) is not stated in
+    # the papers that could be read, so these numbers are not directly comparable
+    # to the TI used here, which is measured to the first excitation with centric
+    # ordering (Gietzen 2025 confirms every shot starts near the k-space centre).
+    # T1 is also ~32% shorter on average at 0.55T (Campbell-Washburn 2019, an
+    # average over tissues). Left as None so it is computed from the relaxation
+    # table via :func:`null_time_after_t2prep` -- see ``ti_null_tissue``.
     ti: float | None = None
     ti_null_tissue: str = "fat"
-    # Why fat: Pennig 2020 describes the module as a non-volume-selective STIR,
-    # i.e. its stated job is nulling short-T1 fat. With the 0.55T table this
-    # lands at ~84 ms, close to the 70 ms published at 1.5T -- a useful sanity
-    # check that the derivation is not wandering. Set to "muscle" to null
-    # background muscle instead, or set ``ti`` outright to override.
+    # Why fat, and why that is only a default: Pennig 2020 calls the module a
+    # non-volume-selective STIR, which suggests nulling fat. Yoneyama 2019 instead
+    # says the two preparations together suppress "tissue with short T1 and T2",
+    # not fat specifically -- and REACT removes fat through the Dixon
+    # reconstruction anyway. So nulling fat is an interpretation, not a stated aim.
+    # With the 0.55T table it lands at ~84 ms; because the null time is linear in
+    # the fat T1, and that T1 is not traced to a primary measurement (see
+    # phantom.TISSUE_PROPERTIES), it could plausibly be nearer 60 ms. The
+    # optimizers in scripts/ use an objective that still penalises fat; see
+    # scripts/optimize_react_ti.py for the water-image objective. Set
+    # ``ti_null_tissue="muscle"`` to null muscle, or set ``ti`` outright.
 
     # --- Readout: spoiled dual-echo Dixon ---
     # Flip angle 15 deg: Pennig 2020 states the low flip angle is chosen
@@ -190,6 +216,9 @@ class ReactParams:
             raise ValueError("tfe_factor must be at least 1")
         if self.inversion_kind not in ("block", "adiabatic"):
             raise ValueError(f"unknown inversion kind {self.inversion_kind!r}")
+        if self.t2prep_refocus not in (1, 2, 4, 8, 16):
+            raise ValueError(
+                f"t2prep_refocus must be 1, 2, 4, 8 or 16, got {self.t2prep_refocus}")
 
     @property
     def n_encodes(self) -> int:

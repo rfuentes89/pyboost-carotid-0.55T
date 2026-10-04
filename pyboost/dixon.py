@@ -9,17 +9,28 @@ information lives in the *complex* signal; taking magnitudes first discards it.
 
 Provenance -- read this before citing
 -------------------------------------
-The echo-time *concept* (two-point Dixon with freely chosen echo times, which is
-what REACT's mDIXON readout relies on) is that of
+Only *abstracts* were read for the papers below; none of them was read in full.
+The closed-form per-voxel derivation in this module is original to this code and
+is verified numerically by ``tests/test_dixon.py``. It is not a transcription of
+any of these papers and should not be cited as one.
 
-    Eggers H, Brendel B, Duijndam A, Herigault G.
-    "Dual-echo Dixon imaging with flexible choice of echo times."
-    Magn Reson Med 2011;65(1):96-107.  doi:10.1002/mrm.22578
-
-Only that paper's *abstract* was read while writing this module. **The
-closed-form per-voxel derivation below is original to this code** and is
-verified numerically by ``tests/test_dixon.py``; it is not a transcription of
-the paper's algorithm and should not be cited as one.
+* Eggers H, Brendel B, Duijndam A, Herigault G. "Dual-echo Dixon imaging with
+  flexible choice of echo times." Magn Reson Med 2011;65(1):96-107.
+  doi:10.1002/mrm.22578. Cited for the concept REACT's mDIXON readout relies on:
+  a two-point method freed from the opposed-phase echo-time restriction. Its
+  abstract also reports that a more accurate fat spectral model substantially
+  reduces variation in the fat suppression -- a limit of the single-peak model
+  used here.
+* Berglund J et al. "Two-point Dixon method with flexible echo times." Magn Reson
+  Med 2011. Its abstract describes the same structure as this module: phase
+  errors, mostly from static field inhomogeneity, must be removed before the
+  least-squares water/fat estimate; the resulting ambiguity is resolved by a
+  global optimization (message passing, versus the simpler region growing used
+  here); noise in the estimates matches the Cramer-Rao bounds; and the signal
+  model accounts for spectral broadening of the fat peak (not modelled here).
+* Eggers H et al. "Chemical shift encoding-based water-fat separation
+  methods." J Magn Reson Imaging 2014. A review covering the selection of key
+  parameters and typical artifacts; the place to look before changing echo times.
 
 Signal model
 ------------

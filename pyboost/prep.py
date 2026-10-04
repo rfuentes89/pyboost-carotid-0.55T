@@ -61,31 +61,70 @@ def fat_sat(system: pp.Opts, flip_angle_deg: float = 180.0,
     return [[sp1], [rf], [sp2]]
 
 
-def t2_prep(system: pp.Opts, te: float = 50e-3, trf: float = 500e-6) -> Blocks:
+# MLEV-16 phase pattern for a train of 180 deg pulses (+1 -> +y, -1 -> -y). Any
+# prefix of length 1, 2, 4, 8 or 16 is balanced. These are plain hard pulses, so
+# this is *not* claimed to reproduce the composite or adiabatic refocusing used in
+# the published MLEV4/MLEV8 T2 preparations (Paredes 2025, 0.55T) or in REACT
+# itself, whose pulse details were not available; it is the same idea (phase
+# cycling the refocusing train) on this repo's hard-pulse building blocks.
+_MLEV16 = (+1, +1, -1, -1, -1, +1, +1, -1, -1, -1, +1, +1, +1, -1, -1, +1)
+_VALID_REFOCUS = (1, 2, 4, 8, 16)
+
+
+def t2_prep(system: pp.Opts, te: float = 50e-3, trf: float = 500e-6,
+            n_refocus: int = 1) -> Blocks:
     """MLEV-style composite T2 preparation (``RR_sim.jl:83-95``).
 
-    ``90x -- TE/2 -- 180y -- TE/2 -- (-90x) -- spoiler``. Restores T2-weighted
-    magnetization to +z; the spoiler dephases residual transverse signal. This
-    is the block that gives BOOST its bright-blood contrast.
+    ``90x -- tau -- [180(+-y) -- 2tau] x n -- ... -- (-90x) -- spoiler``, with
+    ``tau = TE/(2n)`` so TE, measured between the two 90 deg pulse centres, is
+    unchanged by ``n_refocus``. The 180s follow the MLEV-16 phase pattern
+    (``y, y, -y, -y, -y, y, y, -y, ...``). Restores T2-weighted magnetization to
+    +z; the spoiler dephases residual transverse signal. This is the block that
+    gives BOOST its bright-blood contrast.
+
+    ``n_refocus`` is 1 (the original single-180 block, kept as the default so
+    BOOST and MRA are unchanged), 2, 4, 8 or 16. REACT is described with four
+    refocusing pulses (Gietzen 2025, Table 1), so :class:`ReactParams` uses 4.
+
+    What the extra pulses buy is robustness, not different contrast, and the
+    ideal-pulse MRzero simulation cannot show it: with no relaxation, a +-20% B1
+    error leaves Mz at 0.83 for ``n_refocus=1`` but at 1.000 for 4 or 8 (measured
+    with a Bloch simulation of the returned blocks; ``tests/test_prep.py`` pins
+    it), and without the +-y cycling 8 pulses fall back to 0.96.
+
+    Delays are snapped to the block raster, so TE can differ from the request by
+    up to ``n_refocus`` raster steps (80 us at 8 pulses). For the default
+    ``te=50 ms, n_refocus=1`` nothing moves.
     """
-    half = te / 2 - 1.5 * trf
-    if half <= 0:
-        raise ValueError(f"T2-prep TE={te*1e3:.1f} ms too short for RF duration")
+    if n_refocus not in _VALID_REFOCUS:
+        raise ValueError(f"n_refocus must be one of {_VALID_REFOCUS}, got {n_refocus}")
+    tau = te / (2 * n_refocus)
+    lead = tau - 1.5 * trf            # 90 end -> first 180 start (and last 180 -> -90)
+    mid = 2 * tau - 2 * trf           # between consecutive 180s
+    if lead <= 0 or (n_refocus > 1 and mid <= 0):
+        raise ValueError(
+            f"T2-prep TE={te*1e3:.1f} ms too short for RF duration with "
+            f"{n_refocus} refocusing pulse(s)")
+    raster = system.block_duration_raster
+
+    def snap(t: float) -> float:
+        return round(t / raster) * raster
+
     rf_90x = pp.make_block_pulse(np.pi / 2, duration=trf, phase_offset=0.0,
                                  system=system, use="preparation")
-    rf_180y = pp.make_block_pulse(np.pi, duration=2 * trf, phase_offset=np.pi / 2,
-                                  system=system, use="preparation")
     rf_m90x = pp.make_block_pulse(np.pi / 2, duration=trf, phase_offset=np.pi,
                                   system=system, use="preparation")
     sp = _spoiler(system, 8.0, flat_time=6000e-6, rise_time=600e-6)
-    return [
-        [rf_90x],
-        [pp.make_delay(half)],
-        [rf_180y],
-        [pp.make_delay(half)],
-        [rf_m90x],
-        [sp],
-    ]
+
+    blocks: Blocks = [[rf_90x], [pp.make_delay(snap(lead))]]
+    for k in range(n_refocus):
+        phase = np.pi / 2 if _MLEV16[k] > 0 else -np.pi / 2
+        blocks.append([pp.make_block_pulse(np.pi, duration=2 * trf,
+                                           phase_offset=phase, system=system,
+                                           use="preparation")])
+        blocks.append([pp.make_delay(snap(lead if k == n_refocus - 1 else mid))])
+    blocks += [[rf_m90x], [sp]]
+    return blocks
 
 
 def inversion(system: pp.Opts, post_delay: float, kind: str = "block",
