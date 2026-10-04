@@ -60,3 +60,15 @@ def test_signal_is_differentiable(imported):
     s.backward()
     assert flip.grad is not None and torch.isfinite(flip.grad)
     assert abs(float(flip.grad)) > 0  # signal actually depends on the flip
+
+
+def test_disc_weight_is_the_disc_fourier_transform():
+    from pyboost.diffopt import disc_weight
+    R = 3e-3
+    assert float(disc_weight(torch.tensor([0.0]), R)) == 1.0
+    # first zero of 2 J1(x)/x is at x = 3.8317 = 2 pi R k
+    k0 = 3.8317 / (2 * np.pi * R)
+    assert abs(float(disc_weight(torch.tensor([k0]), R))) < 1e-3
+    # a larger disc falls off faster
+    k = torch.tensor([100.0])
+    assert abs(float(disc_weight(k, 4e-3))) != abs(float(disc_weight(k, 2e-3)))

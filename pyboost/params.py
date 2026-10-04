@@ -183,13 +183,15 @@ class ReactParams:
     # that seemed natural, that is +144% contrast and +105% blood signal for a
     # 6 s -> 18 s scan on the 2D protocol.
     #
-    # Two warnings. (1) The objective is the k-space-centre signal only, so it
-    # sees the first TR of a shot and not the decay of the prepared magnetization
-    # over the whole train; treat 3.0 s as provisional (docs/react_literature.md,
-    # O10). An earlier "decoy maximum near 800 ms" was a non-steady-state
-    # artefact and no longer exists. (2) In 3D the shot count multiplies by nz,
-    # so this default can make the scan impractically long; re-run the optimizer
-    # with --max-scan to maximize contrast under a scan-time ceiling instead.
+    # Two warnings. (1) The sweep that gave 3.0 s scores the amplitude at the
+    # centre of a disc vessel over the whole scan (R = 3.0 and 2.2 mm), with the
+    # water objective: the efficiency optimum is 2.5-3.5 s depending on TI and
+    # vessel size, and 2.0 s keeps 76-80% of the contrast and 94-98% of the
+    # efficiency for a third less time (docs/react_literature.md, O2). An earlier
+    # "decoy maximum near 800 ms" was a non-steady-state artefact and no longer
+    # exists. (2) In 3D the shot count multiplies by nz, so this default can make
+    # the scan impractically long; re-run the optimizer with a scan-time ceiling
+    # instead.
     shot_interval: float = 3.0           # time from one preparation to the next [s]
     dummy_shots: int = 2                 # shots run without ADC to reach steady state
     centric: bool = True                 # centre of k-space right after the TI

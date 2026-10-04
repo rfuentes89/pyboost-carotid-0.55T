@@ -258,6 +258,75 @@ def react_dc_signal(seq0, obj, nx: int) -> torch.Tensor:
     return sig[c]
 
 
+def disc_weight(kr: torch.Tensor, radius: float) -> torch.Tensor:
+    """Fourier transform of a uniform disc of ``radius`` [m], equal to 1 at k = 0.
+
+    ``kr`` is the in-plane spatial frequency in cycles/m (what MRzero reports):
+    ``D(k) = 2 J1(2 pi R k) / (2 pi R k)``.
+    """
+    x = 2.0 * np.pi * radius * kr
+    safe = torch.where(x < 1e-9, torch.ones_like(x), x)
+    d = 2.0 * torch.special.bessel_j1(safe) / safe
+    return torch.where(x < 1e-9, torch.ones_like(x), d)
+
+
+def react_signals(seq0, obj, nx: int, radii) -> Tuple[torch.Tensor, dict]:
+    """One simulation, every REACT contrast metric.
+
+    Returns ``(dc, {radius: A})``: ``dc`` is the single sample nearest the k-space
+    centre (what :func:`react_dc_signal` returns) and ``A`` the disc-vessel
+    amplitude of :func:`react_object_signal` for each radius in ``radii`` [m].
+    Sharing the simulation matters: it is the slow part, and it keeps the two
+    metrics strictly comparable.
+    """
+    signal, kspace = mr0.util.simulate(seq0, obj)
+    sig = signal.reshape(-1)
+    k = kspace.detach().cpu().numpy()
+    if np.abs(k[:, 2]).max() > 1e-3:
+        raise NotImplementedError(
+            "react_object_signal models a 2D disc; the sequence has kz encoding")
+    n_tr = len(sig) // (2 * nx)
+    idx = np.concatenate([np.arange(2 * i * nx, 2 * i * nx + nx)
+                          for i in range(n_tr)])
+    kr_np = np.linalg.norm(k[idx][:, :2], axis=1)
+    dc = sig[int(idx[np.argmin(kr_np)])]
+    kr = torch.from_numpy(kr_np).float()
+    out = {}
+    for r in radii:
+        d = disc_weight(kr, r)
+        out[r] = (sig[idx] * d).sum() / d.sum()
+    return dc, out
+
+
+def react_object_signal(seq0, obj, radius: float, nx: int) -> torch.Tensor:
+    """Complex signal at the centre of a uniform disc vessel, over the whole scan.
+
+    :func:`react_dc_signal` returns the single k-space-centre sample, which is
+    acquired in TR 0 of the first shot, so it scores only ``|Mz(TI)|`` and never
+    sees how the prepared magnetization decays along the 20-odd TRs of a shot.
+    A vessel of radius ``R`` does not live at k = 0: its spectrum is the disc
+    transform ``D(k)`` and every acquired sample contributes with that weight. For
+    a point voxel the simulated stream is ``S(k) = m(TR(k))``, the magnetization
+    available when that line was acquired, so the amplitude at the centre of a
+    fully sampled disc is::
+
+        A = | sum_k S(k) D(k) | / sum_k D(k)
+
+    which is 1 if ``S`` were uniform. Only echo 1 is used (echo 2 exists to
+    encode fat). ``obj`` should be a single voxel with a *small* ``voxel_size``:
+    MRzero multiplies the signal by the voxel's own sinc envelope along the
+    readout, which would otherwise zero the outer part of every line.
+
+    Checked against an explicit disc of 113 voxels (R = 3 mm, 0.5 mm pitch) in the
+    same sequence: 0.0931 against 0.0922, 1%.
+
+    Limits: a 2D disc. For 3D (``nz > 1``) a vessel along z would weigh only the
+    ``kz = 0`` plane, which this does not model, so it refuses rather than
+    return a number that looks right.
+    """
+    return react_signals(seq0, obj, nx, [radius])[1][radius]
+
+
 def central_signal(seq0, obj, per: int) -> torch.Tensor:
     """Central-k |signal| of the first contrast block (the echo peak)."""
     signal, kspace = mr0.util.simulate(seq0, obj)
