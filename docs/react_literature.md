@@ -2,8 +2,8 @@
 
 Status of every claim behind `pyboost/react.py` and its helpers. Compiled from PubMed
 and Consensus (abstracts), plus full text where open access allowed. **Not read:** the
-full text of Yoneyama 2019 (abstract only), the Pennig/Hoyer 3T table, and the
-per-tissue relaxation table of Campbell-Washburn 2019. Scite was unavailable (paid
+full text of Yoneyama 2019 (abstract only) and the Pennig/Hoyer 3T table. The
+Campbell-Washburn 2019 relaxation table was supplied by the user as an image. Scite was unavailable (paid
 plan); ScienceDirect, PMC web and Europe PMC were blocked by the proxy.
 
 **No REACT paper at 0.55T, or at any low field, was found.** Nothing here has a
@@ -11,7 +11,8 @@ direct reference at this field strength.
 
 Read in full: Isaak 2021, Pennig 2020 (stroke, CHD), Gietzen 2025, Erdem 2025.
 Abstract only (Paredes 2025 and Pedraza 2025 are used above but their read status was not recorded; treat as abstract-level; Khodarahmi's ~47% applies to non-fluid tissues and its use for fat is an extrapolation): Yoneyama 2019, Berglund 2011, Eggers 2011, Eggers 2014, Khodarahmi 2024,
-Campbell-Washburn 2019, Castillo-Passi 2024, Pedraza 2025, Tian 2023.
+Castillo-Passi 2024, Pedraza 2025, Tian 2023. Campbell-Washburn 2019: abstract plus the
+relaxation table supplied by the user.
 
 ## Verified
 
@@ -58,7 +59,7 @@ Campbell-Washburn 2019, Castillo-Passi 2024, Pedraza 2025, Tian 2023.
 | O1 | **TI and its objective.** The literature spans 7.8-70 ms; the reference point of the Philips "inversion delay" is unknown. | Re-scored over the whole scan (`optimize_react_ti.py`: real geometry, 12 dummy shots, disc vessel). Water objective (blood - muscle): optimum TI 145 ms for R = 3.0 mm (95% plateau 115-155) and **85 ms for R = 2.2 mm (65-95)**; the old single-sample metric gave 155. So the optimum depends on vessel size and there is no single TI. The current default 84.2 ms keeps 89% of the optimum at R = 3.0 and 99.9% at R = 2.2. Contrast by preparation (blood - muscle, R = 3.0 / 2.2): none 0.006 / 0.002; T2-prep alone 0.064 / 0.045; + IR 12 ms 0.059 / 0.059; + IR 84 ms 0.072 / 0.068; + IR 155 ms 0.081 / 0.039. A short-TI inversion is below T2-prep alone for the larger vessel and 32% above it for the smaller one, which narrows but does not remove the disagreement with published 7.8-70 ms delays. Default unchanged. |
 | O2 | **`shot_interval`.** Published practice is 1-2 heartbeats (Erdem chose 2: CNR 15.8/18.7/21.3 at 1/2/3 HB, +78%/+38% time). | Steady state, water objective, disc vessel, relative to 3.0 s (contrast / efficiency). TI 84.2 ms: 1.5 s -> 58% / 82% (R 3.0), 60% / 85% (R 2.2); 2.0 s -> 76% / 94%, 80% / 98%. TI 155 ms: 1.5 s -> 57% / 80%, 28% / 40%; 2.0 s -> 78% / 96%, 63% / 77%. Efficiency optimum 3.0 s (R 3.0, either TI), 2.5 s (R 2.2, TI 84), 3.5 s (R 2.2, TI 155). 3.0 s is outside published practice; 2.0 s costs 2-6% efficiency at TI 84 ms for a third less time. Default unchanged. |
 | O3 | Acceleration (CS/SENSE 3-10x in all protocols) not implemented. | Out of scope this round. |
-| O4 | **Relaxometry untraced.** `TISSUE_PROPERTIES` comes from a Koma reference script. | `react_ti_sensitivity.py`: fat T1 183 -> 125-135 ms (Khodarahmi, ~47% of 1.5T) moves the fat null from 84 to 58-62 ms; muscle null 152 ms ranges 91-215 ms over T1 +-20%, T2 40-70 ms. Needs the Campbell-Washburn per-tissue table. |
+| O4 | **Relaxometry.** Campbell-Washburn 2019 table (user-supplied) now traces blood and fat; **muscle and vessel wall are not in it.** | Blood 1122 +- 85 / 263 +- 27 ms matches `TISSUE_PROPERTIES`; fat 187 +- 10 / 93 +- 16 ms in the table vs 183 / 93 in the code (T1 within the SD, kept). Muscle 450/55 and wall 750/90 ms come from the Koma script with no primary source; the table has myocardium (701 +- 24 / 58 +- 6 ms) but no skeletal muscle. Null times (50 ms T2-prep): fat 86.0 ms (74-97 ms across the table's SD) so the 84.2 ms default is within the measured spread; blood 676 ms; muscle 152 ms with the code value, ~247 ms with myocardium as a proxy bound. The earlier hypothesis "fat T1 ~125-135 ms from a 47% rule" is **refuted**: measured fat T1 is 55-65% of its 1.5T range. Muscle-proxy sweep (`optimize_react_ti.py --muscle 0.701,0.058`, water objective, 15 ms grid, 3.0 s interval): the optimum follows the muscle null. Code muscle 450/55: TI 145 ms (R 3.0 mm) and 85 ms (R 2.2 mm). Myocardium proxy 701/58: 245 ms (R 3.0, 95% plateau 140-245) and 170 ms (R 2.2, plateau 80-185). The current 84.2 ms default keeps 89% / 100% of the optimum with the code muscle and 92% / 95% with the proxy (R 3.0 / R 2.2). So where the optimum sits depends on a muscle T1 that has no source, but the default loses at most ~11% of the water contrast across both assumptions and both vessel sizes tested. Default unchanged. |
 | O5 | SNR at 0.55T unknown; the Dixon separation fails at SNR <= 5, frail near 7. | Measured on synthetic data only. |
 | O6 | Flow-induced swaps: DTE is 2.7x longer than at 1.5T. | My hypothesis, unverified; synthetic validation has no flow. |
 | O7 | Single-peak fat model. | Eggers 2011 reports multi-peak reduces variability. |
@@ -68,6 +69,23 @@ Campbell-Washburn 2019, Castillo-Passi 2024, Pedraza 2025, Tian 2023.
 | O11 | **Segmented-centric ordering.** `shot_encodes` gave each shot a contiguous block of the centre-sorted list, so only shot 0 started at the centre (ky 60, 71, 82, ...). | Fixed: with `centric` the shots are interleaved (shot s takes entries s, s+N, s+2N, ...), so each shot starts next to the centre and climbs to high radius; the train is 20 lines for 120 encodes at `tfe_factor` 22. **This is my interpretation**: Gietzen 2025 describes the low-high order but not the division between shots, and no 0.55T paper found describes the order of a REACT-type readout (0.55T BOOST papers use a different sequence, bSSFP with variable-density spiral-like Cartesian sampling). Spogis 2025 reports Cartesian REACT, with stack-of-stars in the abdomen. |
 | O12 | **Two-point Dixon assumes water and fat of the same sign.** The inversion can leave water negative and fat near zero or positive. Verified on synthetic voxels (TE 4.18/9.85 ms, +5 Hz): W=-1, F=0.5 returns water 1.52 and a field map error of -45 Hz; W=-0.3, F=1 returns -76 Hz. The fit residual is large (0.68, 0.23) so it is detectable, but nothing checks it. The "both candidates fit exactly" statement in `dixon.py` holds only for same-sign pools. | Verified; not fixed. |
 | O13 | Library default `scanner_055T()` is 26 mT/m, 45 T/m/s, above the user's 23/25. REACT's own fallback now uses 23/25/20 us; BOOST/MRA still use the library default. | REACT fixed; BOOST/MRA are the user's call. |
+
+## Relaxation values at 0.55T (Campbell-Washburn 2019, supplied by the user as an image)
+
+T1 / T2 in ms, mean +- SD; 1.5T range in brackets.
+
+| Tissue | T1 0.55T | T2 0.55T | T1 1.5T | T2 1.5T |
+|---|---|---|---|---|
+| Arterial blood | 1122 +- 85 | 263 +- 27 | 1441-1898 | 254-290 |
+| Fat | 187 +- 10 | 93 +- 16 | 288-343 | 53-84 |
+| Myocardium | 701 +- 24 | 58 +- 6 | 950-1030 | 40-58 |
+| Liver | 339 +- 31 | 66 +- 6 | 576-586 | 46-55 |
+| White matter | 493 +- 33 | 89 +- 9 | 608-884 | 54-96 |
+| Gray matter | 717 +- 82 | 112 +- 7 | 1002-1304 | 93-109 |
+| Kidney cortex | 651 +- 48 | 101 +- 7 | 690-966 | 55-87 |
+| Lung | 971 +- 62 | 61 +- 11 | 1171-1333 | 41 |
+
+No skeletal muscle and no vessel wall in the table.
 
 ## Vessel size used for scoring (ultrasound, healthy adults; abstracts only, none is MRI or 0.55T)
 

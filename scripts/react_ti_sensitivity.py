@@ -1,19 +1,27 @@
 #!/usr/bin/env python
-"""How much do REACT's null times move if the 0.55T relaxation table is wrong?
+"""How much do REACT's null times move within the measured 0.55T relaxation spread?
 
-``TISSUE_PROPERTIES`` comes from a reference script of the group's Koma work, not
-from a primary 0.55T measurement that has been checked here. The inversion time
-that nulls a tissue after the T2-prep is ``TI = T1 * ln(1 + exp(-TE_prep/T2))``
-(pyboost.params.null_time_after_t2prep), so it is linear in T1 and the question
-is just how large the plausible T1 error is. This script tabulates it; it uses no
-simulator and adds no new tissue values -- the alternatives below are scalings of
-the table's own entries, labelled as such.
+Source of the tissue values
+---------------------------
+Campbell-Washburn AE et al., Radiology 2019, table of T1/T2/T2* at 0.55T and 1.5T
+(supplied by the user as an image). Used here, mean +- SD at 0.55T:
 
-Two indirect statements bound the scaling (both read as abstracts only):
-* Khodarahmi 2024: T1 of non-fluid tissues at 0.55T is ~47% of the 1.5T value.
-  That would put fat near 125-135 ms instead of the table's 183 ms.
-* Campbell-Washburn 2019: averaged over tissues T1 is 32% shorter and T2 26%
-  longer than at 1.5T (per-tissue table not read).
+    arterial blood   T1 1122 +- 85 ms   T2 263 +- 27 ms
+    fat              T1  187 +- 10 ms   T2  93 +- 16 ms
+    myocardium       T1  701 +- 24 ms   T2  58 +-  6 ms
+
+``TISSUE_PROPERTIES`` matches blood exactly and uses 183 ms for fat T1 (within the
+SD of the table's 187; kept as is). **Skeletal muscle and vessel wall are not in
+that table**: muscle 450/55 ms and wall 750/90 ms come from the Koma reference
+script with no primary source. Myocardium is printed below only as a labelled
+proxy bound for muscle, not as a substitute: it is a different tissue.
+
+An earlier version of this script tested a fat T1 of 125-135 ms (from reading a
+"47% of the 1.5T value" statement in an abstract). The table refutes it: measured
+fat T1 is 187 ms, 55-65% of its 1.5T range (288-343 ms).
+
+The null time after the T2-prep is ``TI = T1 ln(1 + exp(-TE_prep/T2))``
+(``pyboost.params.null_time_after_t2prep``); no simulator is used here.
 
 Usage: python scripts/react_ti_sensitivity.py
 """
@@ -31,43 +39,49 @@ from pyboost.phantom import TISSUE_PROPERTIES as T
 
 TE_PREP = 50e-3
 
+# Campbell-Washburn 2019, 0.55T: (T1, sd, T2, sd) in seconds.
+TABLE = {
+    "blood":      (1.122, 0.085, 0.263, 0.027),
+    "fat":        (0.187, 0.010, 0.093, 0.016),
+    "myocardium": (0.701, 0.024, 0.058, 0.006),
+}
 
-def mz(t1: float, t2: float, ti: float) -> float:
-    """Longitudinal magnetization (units of M0) after T2-prep, IR and TI."""
-    e2 = math.exp(-TE_PREP / t2)
-    return 1.0 - (1.0 + e2) * math.exp(-ti / t1)
+
+def null_ms(t1, t2):
+    return null_time_after_t2prep(t1, t2, TE_PREP) * 1e3
 
 
 def main() -> int:
     print(f"T2-prep {TE_PREP*1e3:.0f} ms. Null time TI = T1 ln(1+E2) [ms]\n")
-    print(f"{'tissue':<8}{'T1 [ms]':>9}{'T2 [ms]':>9}{'null TI':>10}")
+    print(f"{'tissue':<12}{'T1 [ms]':>9}{'T2 [ms]':>9}{'null TI':>10}  source")
     for n in ("fat", "muscle", "wall", "blood"):
         t = T[n]
-        print(f"{n:<8}{t['T1']*1e3:>9.0f}{t['T2']*1e3:>9.0f}"
-              f"{null_time_after_t2prep(t['T1'], t['T2'], TE_PREP)*1e3:>10.1f}")
+        src = {"blood": "matches Campbell-Washburn 2019",
+               "fat": "T2 matches; T1 183 vs 187 +- 10 in the table",
+               "muscle": "NOT in the table; Koma script, no primary source",
+               "wall": "NOT in the table; Koma script, no primary source"}[n]
+        print(f"{n:<12}{t['T1']*1e3:>9.0f}{t['T2']*1e3:>9.0f}"
+              f"{null_ms(t['T1'], t['T2']):>10.1f}  {src}")
 
-    print("\nFat null vs fat T1 (T2 fixed at the table's 93 ms):")
-    for t1 in (0.125, 0.135, 0.150, 0.183):
-        tag = "  <- table" if t1 == 0.183 else ""
-        print(f"  T1 {t1*1e3:>4.0f} ms -> TI {null_time_after_t2prep(t1, T['fat']['T2'], TE_PREP)*1e3:>5.1f} ms{tag}")
+    print("\nNull time from the table's own mean +- SD (T1 and T2 varied together "
+          "to the extremes):")
+    print(f"{'tissue':<12}{'mean':>8}{'T1 +-SD only':>20}{'T2 +-SD only':>20}{'extremes':>20}")
+    for n, (t1, s1, t2, s2) in TABLE.items():
+        mean = null_ms(t1, t2)
+        a = (null_ms(t1 - s1, t2), null_ms(t1 + s1, t2))
+        b = (null_ms(t1, t2 - s2), null_ms(t1, t2 + s2))
+        corners = [null_ms(t1 + i * s1, t2 + j * s2) for i in (-1, 1) for j in (-1, 1)]
+        print(f"{n:<12}{mean:>8.1f}{a[0]:>10.1f}-{a[1]:<9.1f}{b[0]:>10.1f}-{b[1]:<9.1f}"
+              f"{min(corners):>10.1f}-{max(corners):<9.1f}")
 
-    print("\nMuscle null vs muscle T1 and T2 (the water-objective optimum sits here):")
+    print("\nMuscle null, the water-image optimum: the table has no skeletal muscle.")
+    print(f"  code value 450/55 ms (no source)      -> {null_ms(0.450, 0.055):6.1f} ms")
+    print(f"  myocardium 701/58 ms (proxy bound)    -> {null_ms(0.701, 0.058):6.1f} ms")
+    print("  muscle null over T1 +-20% and T2 40-70 ms around the code value:")
     print(f"  {'':>10}" + "".join(f"T2 {t2*1e3:>3.0f} ms " for t2 in (0.040, 0.055, 0.070)))
     for t1 in (0.36, 0.45, 0.54):
-        row = "".join(f"{null_time_after_t2prep(t1, t2, TE_PREP)*1e3:>10.1f} " for t2 in (0.040, 0.055, 0.070))
-        tag = " <- table T1" if t1 == 0.45 else ""
-        print(f"  T1 {t1*1e3:>4.0f} ms{row}{tag}")
-
-    print("\nBlood-muscle contrast vs TI if the muscle T1 is off by -20/0/+20% "
-          "(full recovery, no readout):")
-    print(f"  {'TI [ms]':>8}{'-20%':>9}{'table':>9}{'+20%':>9}")
-    for ti in (0.012, 0.0842, 0.120, 0.155, 0.190):
-        vals = []
-        for f in (0.8, 1.0, 1.2):
-            b = abs(mz(T['blood']['T1'], T['blood']['T2'], ti))
-            m = abs(mz(T['muscle']['T1'] * f, T['muscle']['T2'], ti))
-            vals.append(b - m)
-        print(f"  {ti*1e3:>8.1f}" + "".join(f"{v:>9.3f}" for v in vals))
+        print(f"  T1 {t1*1e3:>4.0f} ms" + "".join(f"{null_ms(t1, t2):>10.1f} "
+                                                  for t2 in (0.040, 0.055, 0.070)))
     return 0
 
 

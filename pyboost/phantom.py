@@ -23,6 +23,13 @@ from typing import Dict
 import numpy as np
 
 # (PD, T1[s], T2[s]). Air is handled separately (PD = 0, excluded).
+# Provenance (0.55T, Campbell-Washburn AE et al., Radiology 2019, relaxation table):
+#   blood  T1 1122 +- 85 / T2 263 +- 27 ms: matches the table.
+#   fat    T1 187 +- 10 / T2 93 +- 16 ms in the table; T2 matches, T1 183 ms is
+#          within the SD and kept.
+#   muscle 450/55 ms and wall 750/90 ms: NOT in the table (no skeletal muscle, no
+#          vessel wall); they come from the Koma reference script and have no
+#          primary source. PD values are likewise untraced.
 TISSUE_PROPERTIES: Dict[str, Dict[str, float]] = {
     "blood":  dict(PD=0.70, T1=1.122, T2=0.263),
     "wall":   dict(PD=0.60, T1=0.750, T2=0.090),

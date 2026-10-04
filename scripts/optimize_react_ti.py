@@ -64,8 +64,10 @@ PUBLISHED = {7.8: "original REACT, 1.5T (Erdem 2025)",
              70.0: "Isaak 2021 Table 1, 1.5T"}
 
 
-def voxel(name: str):
-    t = TISSUES[name]
+def voxel(name: str, override=None):
+    t = dict(TISSUES[name])
+    if override:
+        t.update(override)
     # Small voxel: MRzero applies the voxel's sinc envelope along the readout,
     # which would zero the outer samples of every line (see react_object_signal).
     return mr0.CustomVoxelPhantom(
@@ -110,6 +112,10 @@ def main() -> int:
     ap.add_argument("--hi", type=float, default=200.0, help="sweep end [ms]")
     ap.add_argument("--step", type=float, default=10.0, help="sweep step [ms]")
     ap.add_argument("--dummy-shots", type=int, default=12)
+    ap.add_argument("--muscle", default=None, metavar="T1,T2",
+                    help="override the muscle relaxation times [s], e.g. 0.701,0.058 "
+                         "(myocardium of Campbell-Washburn 2019, a PROXY: the table "
+                         "has no skeletal muscle)")
     ap.add_argument("--ablation", action="store_true",
                     help="also isolate T2-prep and inversion (no prep, T2-prep "
                          "only, IR only, and T2-prep + IR at 12/84/155 ms)")
@@ -118,7 +124,13 @@ def main() -> int:
     system = scanner_055T(max_grad=23.0, max_slew=25.0, rf_ringdown_time=20e-6)
     p = ReactParams(dummy_shots=args.dummy_shots, shot_interval=args.shot_interval)
     seq0, inv_idx, info = import_react_for_optimization(p, system)
-    objs = {n: voxel(n) for n in TISSUE_NAMES}
+    muscle = None
+    if args.muscle:
+        t1, t2 = (float(x) for x in args.muscle.split(","))
+        muscle = {"T1": t1, "T2": t2}
+        print(f"MUSCLE OVERRIDE: T1 {t1*1e3:.0f} ms, T2 {t2*1e3:.0f} ms "
+              f"(null TI {null_time_after_t2prep(t1, t2, p.t2prep_duration)*1e3:.0f} ms)\n")
+    objs = {n: voxel(n, muscle if n == "muscle" else None) for n in TISSUE_NAMES}
 
     base, pos = info[inv_idx[0]]
     min_ti = float(base.sum() - base[pos]) * 1e3
