@@ -202,6 +202,13 @@ class ReactParams:
     ny: int = 120
     nz: int = 1                          # partitions; 1 = single-slice 2D, >1 = 3D slab
     slice_thickness: float = 5e-3        # slab thickness when nz > 1 [m]
+    # Undersampling in (ky, kz). 1.0 = fully sampled (the default, unchanged
+    # behaviour). The pattern is a DESIGN CHOICE of this code, not a published one:
+    # see pyboost.sampling.
+    acceleration: float = 1.0
+    sampling_center_fraction: float = 0.03   # fully sampled central share of all lines
+    sampling_power: float = 3.0              # density law exponent
+    sampling_seed: int = 0
     readout_bandwidth: float = 300.0     # Hz/pixel -- DERIVED, see below
     # The long Dixon spacing at 0.55T is not wasted time: it is spent on a long,
     # low-bandwidth readout, which is exactly the SNR lever low field needs.
@@ -220,6 +227,8 @@ class ReactParams:
             raise ValueError("ny must be even and nz at least 1")
         if self.tfe_factor < 1:
             raise ValueError("tfe_factor must be at least 1")
+        if self.acceleration < 1.0:
+            raise ValueError("acceleration must be at least 1")
         if self.inversion_kind not in ("block", "adiabatic"):
             raise ValueError(f"unknown inversion kind {self.inversion_kind!r}")
         if self.t2prep_refocus not in (1, 2, 4, 8, 16):
@@ -228,8 +237,11 @@ class ReactParams:
 
     @property
     def n_encodes(self) -> int:
-        """Total phase-encode steps (ky x kz)."""
-        return self.ny * self.nz
+        """Phase-encode steps actually acquired: ``ny * nz`` fully sampled, or
+        ``round(ny * nz / acceleration)`` when undersampled."""
+        if self.acceleration == 1.0:
+            return self.ny * self.nz
+        return int(round(self.ny * self.nz / self.acceleration))
 
     @property
     def n_shots(self) -> int:

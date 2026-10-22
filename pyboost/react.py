@@ -31,6 +31,7 @@ doi:10.1016/j.mri.2019.08.017
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import List, Tuple
 
 import pypulseq as pp
@@ -48,19 +49,33 @@ def _dur(blocks: Blocks) -> float:
 
 
 def encode_order(p: ReactParams) -> List[Tuple[int, int]]:
-    """Full ``(ky, kz)`` encode list in acquisition order.
+    """Acquired ``(ky, kz)`` encodes in acquisition order.
 
-    With ``centric`` ordering the encodes are sorted by distance from the centre
-    of k-space. This is not cosmetic: the prepared magnetization recovers
-    throughout the shot, so whatever is acquired late carries progressively less
-    of the REACT contrast. :func:`shot_encodes` decides how this list is divided
-    between shots.
+    The set is the full grid, or the undersampling pattern of
+    :mod:`pyboost.sampling` when ``p.acceleration > 1``. With ``centric`` ordering
+    it is sorted by distance from the centre of k-space, using the **normalised**
+    radius (each axis in units of its half-width). That equals the physical radius
+    in k only for isotropic voxels, which is the 3D design here; for ``nz == 1``
+    the second axis adds a constant and the order is unchanged.
+
+    The sort is not cosmetic: the prepared magnetization recovers throughout the
+    shot, so whatever is acquired late carries progressively less of the REACT
+    contrast. :func:`shot_encodes` decides how this list is divided between shots.
     """
-    encodes = [(ky, kz) for kz in range(p.nz) for ky in range(p.ny)]
-    if p.centric:
-        encodes.sort(key=lambda e: (abs(e[0] - p.ny / 2) ** 2
-                                    + abs(e[1] - p.nz / 2) ** 2))
-    return encodes
+    return list(_encode_order(p.ny, p.nz, p.acceleration, p.sampling_center_fraction,
+                              p.sampling_power, p.sampling_seed, p.centric))
+
+
+@lru_cache(maxsize=8)
+def _encode_order(ny, nz, acceleration, center_fraction, power, seed, centric):
+    from .sampling import acquired_encodes
+    encodes = acquired_encodes(ny, nz, acceleration=acceleration,
+                               center_fraction=center_fraction, power=power,
+                               seed=seed)
+    if centric:
+        hy, hz = ny / 2, nz / 2
+        encodes.sort(key=lambda e: ((e[0] - hy) / hy) ** 2 + ((e[1] - hz) / hz) ** 2)
+    return tuple(encodes)
 
 
 def shot_encodes(shot: int, p: ReactParams) -> List[Tuple[int, int]]:
@@ -187,8 +202,11 @@ def build_react_sequence(p: ReactParams | None = None,
 
     rep = kernel_report(system, p)
     seq.set_definition("Name", "REACT_carotid_055T")
-    seq.set_definition("FOV", [p.fov, p.fov,
-                               p.slice_thickness * (p.nz if p.nz > 1 else 1)])
+    # ``slice_thickness`` is already the slab thickness when nz > 1 (the partition
+    # encode steps by 1/slice_thickness), so it is the z extent as it stands.
+    # An earlier version multiplied it by nz, giving 7.4 m for the 88-partition
+    # protocol and a spurious Pulseq warning.
+    seq.set_definition("FOV", [p.fov, p.fov, p.slice_thickness])
     # Traceability: the derived 0.55T values travel with the .seq file.
     seq.set_definition("ReactTE1", rep["te1"])
     seq.set_definition("ReactTE2", rep["te2"])

@@ -16,6 +16,7 @@ from .readout_dixon import dixon_readout, dixon_echo_spacing, kernel_report
 from .boost import build_boost_sequence
 from .mra import build_mra_sequence
 from .react import build_react_sequence, encode_order, shot_encodes
+from .protocols import react_3d_208x208x88
 from .diffopt import (import_mra_for_optimization, differentiable_flip_signal,
                       set_imaging_flip, locate_t2prep_delays, set_t2prep_te,
                       central_signal, locate_inav_ramp, set_imaging_flip_coupled,
@@ -42,6 +43,7 @@ __all__ = [
     "build_react_sequence",
     "encode_order",
     "shot_encodes",
+    "react_3d_208x208x88",
     "import_mra_for_optimization",
     "differentiable_flip_signal",
     "set_imaging_flip",
