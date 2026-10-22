@@ -115,6 +115,7 @@ def _build_kernel(system: pp.Opts, p: ReactParams) -> _DixonKernel:
         flip_angle=np.deg2rad(p.flip_angle), duration=p.trf,
         slice_thickness=p.slice_thickness, time_bw_product=p.tbw_excitation,
         return_gz=True, system=system, use="excitation",
+        delay=system.rf_dead_time,
     )
 
     gx = pp.make_trapezoid("x", flat_area=p.nx * delta_ky, flat_time=adc_dur,
@@ -226,6 +227,7 @@ def _tr_blocks(system: pp.Opts, p: ReactParams, k: _DixonKernel,
         flip_angle=np.deg2rad(p.flip_angle), duration=p.trf,
         slice_thickness=p.slice_thickness, time_bw_product=p.tbw_excitation,
         phase_offset=phase, return_gz=True, system=system, use="excitation",
+        delay=system.rf_dead_time,        # explicit: pypulseq 1.5 warns when it is implied
     )
     pe_y = (ky - p.ny / 2) * k.delta_ky
     gy_pre = pp.make_trapezoid("y", area=pe_y, duration=k.pre_dur, system=system)

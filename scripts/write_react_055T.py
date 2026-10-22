@@ -49,6 +49,11 @@ def main() -> int:
                     help="adiabatic for the scanner, block for MRzero validation")
     ap.add_argument("--max-grad", type=float, default=23.0, help="mT/m")
     ap.add_argument("--max-slew", type=float, default=25.0, help="T/m/s")
+    ap.add_argument("--format", choices=("native", "1.4"), default="native",
+                    help="native: the format the installed pypulseq writes (1.5.0 "
+                         "with pypulseq >= 1.5). 1.4: write the older 1.4.1 layout "
+                         "(pypulseq >= 1.5 only), for an interpreter that rejects "
+                         "1.5 files. See docs/pulseq_versions.md")
     args = ap.parse_args()
 
     system = scanner_055T(max_grad=args.max_grad, max_slew=args.max_slew,
@@ -160,9 +165,22 @@ def main() -> int:
     print(f"\n[write]   {n_blocks} blocks, {dur:.1f} s total "
           f"({dur/60:.1f} min, {params.n_shots} shots + "
           f"{params.dummy_shots} dummy)")
-    seq.write(args.out)
-    print(f"[write]   wrote {args.out}")
-    print("[write]   target interpreter: Pulseq v1.4.2")
+    import inspect
+    can_legacy = "v141_compat" in inspect.signature(seq.write).parameters
+    if args.format == "1.4":
+        if not can_legacy:
+            raise SystemExit("--format 1.4 needs pypulseq >= 1.5 (the installed one "
+                             "already writes the 1.4 layout)")
+        seq.write(args.out, v141_compat=True)
+    else:
+        seq.write(args.out)
+    with open(args.out) as fh:
+        head = fh.read(400).replace("\n", " ")
+    ver = head.split("[VERSION]")[1].split("[DEFINITIONS]")[0].split()
+    fmt = f"{ver[1]}.{ver[3]}.{ver[5]}"
+    print(f"[write]   wrote {args.out} (Pulseq file format {fmt})")
+    print("[write]   the format must be readable by the scanner's Pulseq interpreter; "
+          "which formats it accepts has NOT been verified here (docs/pulseq_versions.md)")
     return 0
 
 
