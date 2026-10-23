@@ -124,7 +124,7 @@ def test_3d_protocol_preset_builds_and_fits_the_timing(system):
 
 
 def test_default_bandwidth_does_not_fit_at_nx_208(system):
-    """Why the preset uses 350 Hz/pixel: 300 is rejected, not silently mistimed."""
+    """Why the preset uses 384.6 Hz/pixel (12.5 us dwell): 300 rounds to a 15 us dwell and is rejected, not silently mistimed."""
     p = react_3d_208x208x88(5.0, readout_bandwidth=300.0)
     with pytest.raises(ValueError, match="readout"):
         build_react_sequence(p, system)
