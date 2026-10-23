@@ -42,6 +42,9 @@ def main() -> int:
     ap.add_argument("--fov", type=float, default=200.0, help="in-plane FOV [mm]")
     ap.add_argument("--bandwidth", type=float, default=300.0, help="Hz/pixel")
     ap.add_argument("--tfe", type=int, default=22, help="encodes per shot")
+    ap.add_argument("--acceleration", type=float, default=1.0,
+                    help="undersampling factor R of the (ky, kz) pattern in "
+                         "pyboost.sampling (design choice, not a published pattern)")
     ap.add_argument("--ti", type=float, default=None,
                     help="inversion time [ms]; default derives it from the "
                          "0.55T relaxation table")
@@ -62,6 +65,7 @@ def main() -> int:
         nx=args.nx, ny=args.ny, nz=args.nz,
         fov=args.fov * 1e-3, slice_thickness=args.slab * 1e-3,
         readout_bandwidth=args.bandwidth, tfe_factor=args.tfe,
+        acceleration=args.acceleration,
         ti=None if args.ti is None else args.ti * 1e-3,
         inversion_kind=args.inversion,
     )
